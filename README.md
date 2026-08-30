@@ -14,11 +14,11 @@ UI with live results, inline diff previews, and ripgrep speed. Built on
 
 <table>
   <tr>
-    <th align="center">Search-only to start — tick <code>Replace</code> for the full panel</th>
+    <th align="center">Search-only to start — the toggle boxes fill while active; press <code>⇄</code> for the full panel</th>
   </tr>
   <tr>
     <td align="center">
-      <img src="img/preview.png" alt="The Search and Replace float in replace mode: the whole-word ab toggle left of the pattern field, the Aa case and .* regex toggles to its right, then the Replace field, Files-to-Include filter and Replace All button, with a ripgrep results tree showing every match and its old/new line" width="88%">
+      <img src="img/preview.png" alt="The Search and Replace float in replace mode: the ⇄ toggle box left of the fixed-width pattern field, ab, Aa and .* boxes to its right, then the ? help box — active toggles filled — plus the Replace field, Files-to-Include filter and Replace All button, with a ripgrep results tree showing every match and its old/new line" width="88%">
     </td>
   </tr>
 </table>
@@ -27,11 +27,13 @@ UI with live results, inline diff previews, and ripgrep speed. Built on
 
 - 🔍 live debounced results while you type (ripgrep)
 - 🎨 inline red/green diff preview per match, with `\1`–`\9` capture references
-- 🔘 inline `ab` / `Aa` / `.*` toggles on the search row — `Tab` + `Enter`, or
-  `Alt+w` / `Alt+c` / `Alt+r` from anywhere in the float
-- 🔎 search-only to start; ticking `Replace` reveals the replace field and the
-  `Replace All` button — the search box never resizes, VS Code find-widget style
-- ❓ press `?` in normal mode for the full keymap list
+- 🧩 bordered `⇄` / `ab` / `Aa` / `.*` toggle boxes around the search field —
+  they fill while active; `Tab` + `Enter`, or `Alt+w` / `Alt+c` / `Alt+r`
+  from anywhere in the float
+- 🔎 search-only to start; pressing the `⇄` box left of Search reveals the
+  replace field and the `Replace All` button — the search box never resizes,
+  VS Code find-widget style
+- ❓ press `?` (or the `?` box on the search row) for the full keymap list
 - 📂 current-file and word-under-cursor / visual-selection search variants
 - ⚡ `<CR>` jumps straight to the match · `<C-R>` replaces everywhere
 - ⌨️ panel navigation with `Alt+h/j/k/l` — no plugin keymaps stolen from you
@@ -112,8 +114,8 @@ require("vscode-search-replace").open()
 require("vscode-search-replace").open({ file = true, word = true })
 ```
 
-The float opens in search-only mode; tick `Replace` to show the replace field
-and the `Replace All` button.
+The float opens in search-only mode; press the `⇄` box (left of Search) to show
+the replace field and the `Replace All` button.
 
 Troubleshooting: `:checkhealth vscode-search-replace`
 

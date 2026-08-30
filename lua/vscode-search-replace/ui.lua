@@ -58,8 +58,8 @@ function M.create(opts)
         include = "",
         path = opts.path,
     }
-    -- checkbox signs repaint only through reactive props: Component:set_current_value
-    -- does not redraw; a `value = <SignalValue>` prop makes the popup re-render.
+    -- the toggle FILL repaints through reactive props: an `is_active =
+    -- <SignalValue>` prop re-renders the button whenever the field is written.
     local toggles = n.create_signal({ case = false, regex = false, whole = false, replace = false })
     -- Fresh instance per consumer: :map mutates the SignalValue it is called on.
     local function hidden_unless_replace()
@@ -72,6 +72,7 @@ function M.create(opts)
     local close, schedule, run_search, render_results
     local tree_comp
     local attach_panel_maps
+    local toggle_help
 
     close = function()
         if closed then
@@ -288,8 +289,8 @@ function M.create(opts)
         debounce_timer:start(cfg.debounce, 0, vim.schedule_wrap(run_search))
     end
 
-    -- flex=1: it lives inside the horizontal columns row now (with the four
-    -- checkboxes), so it needs to claim the leftover width; without it the
+    -- flex=1: it lives inside the horizontal columns row now (with the toggle
+    -- boxes), so it needs to claim the leftover width; without it the
     -- bordered input collapses to a 3x3 box.
     local ti_search = n.text_input({
         autofocus = true,
@@ -303,53 +304,59 @@ function M.create(opts)
             schedule()
         end,
     })
-    local cb_case = n.checkbox({
-        label = "Aa",
-        value = toggles.case,
-        global_press_key = "<A-c>",
-        padding = { top = 1 },
-        on_change = function(value)
-            params.case_sensitive = value
-            toggles.case = value
-            schedule()
-        end,
-    })
-    local cb_regex = n.checkbox({
-        label = ".*",
-        value = toggles.regex,
-        global_press_key = "<A-r>",
-        padding = { top = 1 },
-        on_change = function(value)
-            params.regex = value
-            toggles.regex = value
-            schedule()
-        end,
-    })
+    -- VS Code find-widget look: every toggle is a small rounded box whose
+    -- interior FILLS while the option is ON. nui-components Button paints
+    -- `is_active` with the NuiComponentsButton{Active,Focused} highlight
+    -- groups — the library defines none of them — so define the fill here
+    -- (default = true: a user/theme override still wins). A bordered box is
+    -- exactly as tall as the bordered Search input, so the row aligns without
+    -- the old checkboxes' top-padding hack.
+    vim.api.nvim_set_hl(0, "NuiComponentsButtonActive", { reverse = true, default = true })
+    vim.api.nvim_set_hl(0, "NuiComponentsButtonFocused", { underline = true, default = true })
+
+    -- field = toggles key; param = params key the engine reads (nil for the
+    -- replace-mode button, which only reveals widgets).
+    local function toggle_button(field, param, label, key, extra)
+        return n.button({
+            label = label,
+            border_style = "rounded",
+            is_active = toggles[field],
+            global_press_key = key,
+            on_press = function()
+                local value = not toggles:get_value()[field]
+                toggles[field] = value
+                if param then
+                    params[param] = value
+                end
+                if extra then
+                    extra(value)
+                end
+            end,
+        })
+    end
+    local tb_case = toggle_button("case", "case_sensitive", "Aa", "<A-c>", schedule)
+    local tb_regex = toggle_button("regex", "regex", ".*", "<A-r>", schedule)
     -- ab is ALWAYS mounted (VS Code keeps its whole-word button permanent):
     -- showing/hiding it would re-flow the flex row and resize the search box
     -- on every mode switch, which is exactly what a find widget must not do.
-    local cb_whole = n.checkbox({
-        label = "ab",
-        value = toggles.whole,
-        global_press_key = "<A-w>",
-        padding = { top = 1 },
-        on_change = function(value)
-            params.whole_word = value
-            toggles.whole = value
-            schedule()
-        end,
-    })
-    local cb_mode = n.checkbox({
-        label = "Replace",
-        value = toggles.replace,
-        padding = { top = 1 },
-        on_change = function(value)
-            toggles.replace = value
-            -- Re-attach Alt/? maps so the freshly visible widgets participate.
-            -- defer (not schedule): the renderer recomputes its focusable list
-            -- in its OWN queued redraw; attaching one tick later sees the new
-            -- widgets instead of the stale pre-toggle list.
-            vim.defer_fn(attach_panel_maps, 60)
+    local tb_whole = toggle_button("whole", "whole_word", "ab", "<A-w>", schedule)
+    -- The replace-mode toggle is an ICON box (VS Code shows a chevron there,
+    -- not the word): ⇄ sits LEFT of Search and reveals/hides the replace
+    -- widgets; the replace TEXT field below keeps its "Replace" border label.
+    local tb_mode = toggle_button("replace", nil, "⇄", nil, function()
+        -- Re-attach Alt/? maps so the freshly visible widgets participate.
+        -- defer (not schedule): the renderer recomputes its focusable list
+        -- in its OWN queued redraw; attaching one tick later sees the new
+        -- widgets instead of the stale pre-toggle list.
+        vim.defer_fn(attach_panel_maps, 60)
+    end)
+    -- discoverability for the keymap overlay: the panel-local `?` mapping
+    -- works, but a visible box tells the user the help exists. Same float.
+    local tb_help = n.button({
+        label = "?",
+        border_style = "rounded",
+        on_press = function(self)
+            toggle_help(self.winid)
         end,
     })
     local ti_replace = n.text_input({
@@ -412,27 +419,31 @@ function M.create(opts)
     shield_text_input(ti_include)
     local btn_replace = n.button({
         label = "Replace All",
+        border_style = "rounded",
         global_press_key = "<C-R>",
         hidden = hidden_unless_replace(),
         on_press = replace_all,
     })
 
-    -- 50/50 split: the search row (ab + input + Aa + .* + Replace) needs the
+    -- 50/50 split: the search row (⇄ + input + ab + Aa + .* + ?) needs the
     -- sidebar wide enough that flex=1 still leaves a usable input at ~80-col
     -- terminals; the tree truncates gracefully.
     local sidebar = n.form(
         { flex = 50 },
         n.columns(
             { flex = 0, size = 1 },
-            cb_whole,
+            tb_mode,
+            n.gap(1),
             ti_search,
-            -- one blank column keeps every toggle clear of the search border
+            -- one blank column keeps every box border clear of its neighbours
             n.gap(1),
-            cb_case,
+            tb_whole,
             n.gap(1),
-            cb_regex,
+            tb_case,
             n.gap(1),
-            cb_mode
+            tb_regex,
+            n.gap(1),
+            tb_help
         ),
         ti_replace,
         ti_include,
@@ -487,8 +498,8 @@ function M.create(opts)
         { "Alt+W", "toggle ab  whole word" },
         { "Alt+R", "toggle .*  regular expression" },
         { "Ctrl+R", "Replace All (asks for confirm)" },
-        { "Replace checkbox", "show/hide replace field + Replace All" },
-        { "? / q / <Esc>", "hide this help" },
+        { "⇄ button", "show/hide replace field + Replace All" },
+        { "? / q / <Esc>", "show/hide this help (? box too)" },
     }
     local help_buf, help_win = nil, nil
     local function close_help()
@@ -497,7 +508,7 @@ function M.create(opts)
         end
         help_win, help_buf = nil, nil
     end
-    local function toggle_help(back_win)
+    toggle_help = function(back_win)
         if help_win and vim.api.nvim_win_is_valid(help_win) then
             close_help()
             if back_win and vim.api.nvim_win_is_valid(back_win) then
@@ -509,7 +520,10 @@ function M.create(opts)
         vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = help_buf })
         local lines = { HELP_HEADER, "" }
         for _, entry in ipairs(HELP_KEYS) do
-            table.insert(lines, ("%-24s%s"):format(entry[1], entry[2]))
+            -- Pad by DISPLAY width: "⇄" is 3 bytes but 1 cell, so %-24s would
+            -- misalign its row.
+            local key, desc = entry[1], entry[2]
+            table.insert(lines, key .. (" "):rep(math.max(1, 24 - vim.fn.strwidth(key))) .. desc)
         end
         local w, h = 62, #lines + 2
         help_win = vim.api.nvim_open_win(help_buf, true, {
