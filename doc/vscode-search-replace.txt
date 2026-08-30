@@ -24,10 +24,15 @@ on <https://github.com/grapp-dev/nui-components.nvim>.
 
   - live results while you type (ripgrep, debounced)
   - inline old/new diff preview per match, with `\1`–`\9` capture references
-  - `Aa` case and `.*` regex toggles, Files-to-Include path/glob filter
+  - inline `ab` whole-word, `Aa` case and `.*` regex toggles on the search
+    row, plus a Files-to-Include path/glob filter
+  - the float opens search-only; ticking `Replace` reveals the replace field
+    and the `Replace All` button — the search box keeps a fixed width
   - whole-project, current-file and word/visual-selection search variants
   - `<CR>` jumps to the match, `<C-R>` replaces everywhere
-  - `Alt+h/j/k/l` panel navigation; the plugin ships no global keymaps
+  - `Alt+h/j/k/l` + `Tab` panel navigation and `Alt+c/w/r` hotkeyed toggles;
+    the plugin ships no global keymaps
+  - `?` in normal mode shows the keymap help overlay
 
 ==============================================================================
 2. Requirements                              *vscode-search-replace-requirements*
@@ -47,6 +52,8 @@ With lazy.nvim: >lua
       cmd = "SearchReplace",
       keys = {
         { "<leader>S", function() require("vscode-search-replace").open() end, desc = "Search & Replace" },
+        { "<leader>sw", mode = { "n", "v" }, function() require("vscode-search-replace").open({ word = true }) end, desc = "Search word under cursor / selection" },
+        { "<C-F>", function() require("vscode-search-replace").open({ file = true, word = true }) end, desc = "Search word under cursor in current file" },
       },
       opts = {},
     }
@@ -89,15 +96,29 @@ debounce *vscode-search-replace-debounce*
 
 Keys inside the float: ~
     Key             Action
+    <Tab>/<S-Tab>   next / previous panel (focus order below)
     <Esc>/<Esc>     close (first <Esc> leaves insert mode in a focused input)
     q               close (normal mode)
-    <CR>            jump to the selected match
+    <CR>            activate the focused widget · jump to the selected match
     <C-R>           Replace All (asks `(Y)es [C]ancel` first)
+    Alt+c           toggle `Aa` match case
+    Alt+w           toggle `ab` whole word
+    Alt+r           toggle `.*` regular expression
     Alt+h/Alt+l     move to the previous/next panel column
     Alt+j/Alt+k     move to the next/previous panel in a column
+    ?               show/hide the keymap help overlay
+
+    Focus order: `ab` -> Search -> `Aa` -> `.*` -> `Replace` -> Replace input
+    -> Files to Include -> Replace All -> results tree. The Replace input and
+    Replace All button are skipped (hidden, not focusable) while the
+    `Replace` checkbox is unticked; ticking it (`Enter`/`Space`) shows them,
+    unticking hides them again. The search box never resizes between modes.
 
 Search fields: ~
     Search              ripgrep pattern (literal unless `.*` is on)
+    ab                  whole-word toggle (left of Search): matches are
+                        wrapped in keyword boundaries — the same semantics as
+                        `rg --word-regexp`; `\1`–`\9` stay unshifted
     Aa / .*             case sensitivity / regex toggles
     Replace             replacement text; `\0`–`\9` are capture references in
                         regex mode. Empty → no diff preview, Replace All is a
@@ -140,6 +161,8 @@ Common issues: ~
     - Tree icons look wrong → install a Nerd Font.
     - `<Esc>` seems to need two presses → expected: the first leaves insert
       mode in the focused input, the second closes the float.
+    - `ab` matches nothing → whole-word requires the match to start and end
+      on keyword characters, like `rg --word-regexp`.
 
 ==============================================================================
 References                                                *vscode-search-replace-refs*

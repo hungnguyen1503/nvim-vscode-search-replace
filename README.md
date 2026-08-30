@@ -14,11 +14,11 @@ UI with live results, inline diff previews, and ripgrep speed. Built on
 
 <table>
   <tr>
-    <th align="center">Live search with inline red/green diff preview</th>
+    <th align="center">Search-only to start — tick <code>Replace</code> for the full panel</th>
   </tr>
   <tr>
     <td align="center">
-      <img src="img/preview.png" alt="The Search and Replace float: pattern and replacement fields, case and regex toggles, Files-to-Include filter, and a ripgrep results tree showing every match with its old and new line" width="88%">
+      <img src="img/preview.png" alt="The Search and Replace float in replace mode: the whole-word ab toggle left of the pattern field, the Aa case and .* regex toggles to its right, then the Replace field, Files-to-Include filter and Replace All button, with a ripgrep results tree showing every match and its old/new line" width="88%">
     </td>
   </tr>
 </table>
@@ -27,7 +27,11 @@ UI with live results, inline diff previews, and ripgrep speed. Built on
 
 - 🔍 live debounced results while you type (ripgrep)
 - 🎨 inline red/green diff preview per match, with `\1`–`\9` capture references
-- 🔘 `Aa` case / `.*` regex toggles, Files-to-Include filter
+- 🔘 inline `ab` / `Aa` / `.*` toggles on the search row — `Tab` + `Enter`, or
+  `Alt+w` / `Alt+c` / `Alt+r` from anywhere in the float
+- 🔎 search-only to start; ticking `Replace` reveals the replace field and the
+  `Replace All` button — the search box never resizes, VS Code find-widget style
+- ❓ press `?` in normal mode for the full keymap list
 - 📂 current-file and word-under-cursor / visual-selection search variants
 - ⚡ `<CR>` jumps straight to the match · `<C-R>` replaces everywhere
 - ⌨️ panel navigation with `Alt+h/j/k/l` — no plugin keymaps stolen from you
@@ -49,10 +53,27 @@ UI with live results, inline diff previews, and ripgrep speed. Built on
   keys = {
     {
       "<leader>S",
+      mode = "n",
       function()
         require("vscode-search-replace").open()
       end,
       desc = "Search & Replace",
+    },
+    {
+      "<leader>sw",
+      mode = { "n", "v" },
+      function()
+        require("vscode-search-replace").open({ word = true })
+      end,
+      desc = "Search word under cursor / selection",
+    },
+    {
+      "<C-F>",
+      mode = "n",
+      function()
+        require("vscode-search-replace").open({ file = true, word = true })
+      end,
+      desc = "Search word under cursor in current file",
     },
   },
 }
@@ -60,14 +81,24 @@ UI with live results, inline diff previews, and ripgrep speed. Built on
 
 ## ⚙️ Configuration
 
+**nvim-vscode-search-replace** works out of the box. Please refer to the default settings below.
+
+<details><summary>Default Settings</summary>
+
 ```lua
 require("vscode-search-replace").setup({
-  position = "center", -- "center" | "top" | "bottom" | "left" | "right"
-  width = 0.9, -- <=1: fraction of the editor; >1: absolute columns
-  height = 0.85, -- <=1: fraction of the editor; >1: absolute lines
-  debounce = 300, -- ms after the last keystroke before re-searching
+  -- float anchor: "center" | "top" | "bottom" | "left" | "right"
+  position = "center",
+  -- width:  <= 1 → fraction of the editor;  > 1 → absolute columns
+  width = 0.9,
+  -- height: <= 1 → fraction of the editor;  > 1 → absolute lines
+  height = 0.85,
+  -- ms after the last keystroke before the re-search fires
+  debounce = 300,
 })
 ```
+
+</details>
 
 ## 🚀 Usage
 
@@ -81,25 +112,29 @@ require("vscode-search-replace").open()
 require("vscode-search-replace").open({ file = true, word = true })
 ```
 
-Inside the float:
-
-| Key               | Action                      |
-| ----------------- | --------------------------- |
-| `<Esc>` / `q`     | close                       |
-| `<CR>`            | jump to match               |
-| `<C-R>`           | Replace All                 |
-| `Alt+h` / `Alt+l` | switch panel column         |
-| `Alt+j` / `Alt+k` | next / previous panel       |
+The float opens in search-only mode; tick `Replace` to show the replace field
+and the `Replace All` button.
 
 Troubleshooting: `:checkhealth vscode-search-replace`
 
-## 🧪 Development
+## ⌨️ Keymaps
 
-The test suite runs headless on mini.test (same harness as `flash.nvim`):
+Every panel is reachable — `Tab`/`Shift+Tab` or `Alt+j`/`Alt+k` to walk, `Enter`/`Space`
+to activate — and the `Alt` hotkeys work from wherever focus is. Press `?` inside the float
+to see this list.
 
-```sh
-nvim -l tests/minit.lua --minitest
-```
+| Keymap                | Mode  | Description                                      |
+| --------------------- | ----- | ------------------------------------------------ |
+| `<Tab>` / `<S-Tab>`   | n/i   | next / previous panel                            |
+| `Alt+h` / `Alt+l`     | n/i   | sidebar ⇄ results tree                           |
+| `Alt+j` / `Alt+k`     | n/i   | previous / next panel in focus order             |
+| `Enter` / `Space`     | n     | activate focused widget · jump to selected match |
+| `Alt+c`               | n/i   | toggle `Aa` — match case                         |
+| `Alt+w`               | n/i   | toggle `ab` — match whole word                   |
+| `Alt+r`               | n/i   | toggle `.*` — regular expression                 |
+| `Ctrl+r`              | n/i   | Replace All (asks `(Y)es [C]ancel`)              |
+| `?`                   | n     | show/hide the keymap help                        |
+| `q` / `Esc` / `<C-f>` | n/i   | close                                            |
 
 ## 🙏 References
 

@@ -41,6 +41,14 @@ describe("engine.build_rg_cmd", function()
     assert.is_true(has(engine.build_rg_cmd(params({ regex = true, case_sensitive = false, pattern = "x", path = "." })), "-i"))
   end)
 
+  it("adds --word-regexp after -F when whole_word is set", function()
+    local cmd = engine.build_rg_cmd(params({ whole_word = true, case_sensitive = false, pattern = "foo", path = "." }))
+    assert.are.same(
+      { "rg", "--json", "--no-heading", "--color", "never", "--line-number", "-i", "-F", "--word-regexp", "-e", "foo", "--", "." },
+      cmd
+    )
+  end)
+
   it("globs live before the pattern; plain paths get a /** companion", function()
     local cmd = engine.build_rg_cmd(params({ pattern = "x", path = ".", include = "src,*.lua," }))
     local gi
@@ -60,6 +68,28 @@ describe("engine pattern/replacement translation", function()
     assert.are.equal([[\v(foo)\C]], engine.build_vim_pattern(params({ regex = true, pattern = "(foo)" })))
     -- \V makes "." literal already; only backslashes get escaped
     assert.are.equal([[\Vfoo.bar\c]], engine.build_vim_pattern(params({ regex = false, case_sensitive = false, pattern = "foo.bar" })))
+  end)
+
+  it("whole-word wraps bounds without shifting user capture groups", function()
+    assert.are.equal([[\v%(<%(a|b)>)\C]], engine.build_vim_pattern(params({ regex = true, whole_word = true, pattern = "a|b" })))
+    assert.are.equal(
+      [[\V\%(\<foo.bar\>\)\c]],
+      engine.build_vim_pattern(params({ regex = false, case_sensitive = false, whole_word = true, pattern = "foo.bar" }))
+    )
+    -- word boundaries require the match start/end be keyword chars, so wrap a
+    -- real word (foo_bar); the inner %() is non-capturing so \1 stays the first
+    -- user group (a capturing wrapper would yield "foo_bar|foo").
+    assert.are.equal(
+      "pre foo|bar post",
+      engine.substitute_line("pre foo_bar post", params({ regex = true, whole_word = true, pattern = [[(\w+)_(\w+)]], replacement = [[\1|\2]] }))
+    )
+  end)
+
+  it("whole-word literal substitute skips foo_bar and bazfoo", function()
+    assert.are.equal(
+      "X foo_bar bazfoo",
+      engine.substitute_line("foo foo_bar bazfoo", params({ whole_word = true, replacement = "X", pattern = "foo" }))
+    )
   end)
 
   it("escapes & and % in replacements; \\1 passes through (substitute expands it)", function()
@@ -157,6 +187,24 @@ if vim.fn.executable("rg") == 1 then
       engine.cancel()
       vim.wait(1500, function() return false end)
       assert.is_false(fired)
+    end)
+
+    it("whole_word narrows matched lines end-to-end on disk", function()
+      -- total counts matched LINES; the embedded-only file drops out under -w
+      local dir = fixture({
+        ["hit.txt"] = { "standalone foo here", "" },
+        ["miss.txt"] = { "foo_bar bazfoo", "" },
+      })
+      local base = { pattern = "foo", case_sensitive = false, replacement = "X" }
+      assert.are.equal(2, run_search(dir, base).total)
+      local res = run_search(dir, vim.tbl_extend("keep", base, { whole_word = true }))
+      assert.are.equal(1, res.total)
+      assert.matches("hit.txt$", res.files[1].path)
+      assert.are.equal("standalone X here", res.files[1].matches[1].new)
+      local out = engine.apply(res, params(vim.tbl_extend("keep", base, { whole_word = true })))
+      assert.are.equal(1, #out.written)
+      assert.are.same({ "standalone X here", "" }, vim.fn.readfile(vim.fs.joinpath(dir, "hit.txt"), "b"))
+      assert.are.same({ "foo_bar bazfoo", "" }, vim.fn.readfile(vim.fs.joinpath(dir, "miss.txt"), "b"))
     end)
   end)
 end

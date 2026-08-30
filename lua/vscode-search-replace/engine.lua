@@ -6,6 +6,7 @@
 --   replacement     = string,   -- raw; \1..\9 + \0 capture refs in regex mode
 --   regex           = boolean,  -- false → -F / \V literal
 --   case_sensitive  = boolean,  -- false → -i / \c
+--   whole_word      = boolean,  -- false → no -w / no word-boundary wrap
 --   include         = string,   -- comma-separated paths/globs; "" = all
 --   path            = string,   -- absolute search root (cwd at open)
 
@@ -41,6 +42,9 @@ function M.build_rg_cmd(params)
     if not params.regex then
         cmd[#cmd + 1] = "-F"
     end
+    if params.whole_word then
+        cmd[#cmd + 1] = "--word-regexp"
+    end
     if params.include and params.include ~= "" then
         for part in (params.include .. ","):gmatch("([^,]*)") do
             local entry = vim.trim(norm_slashes(part))
@@ -74,7 +78,17 @@ end
 ---@return string
 function M.build_vim_pattern(params)
     local pat
-    if params.regex then
+    if params.whole_word then
+        if params.regex then
+            -- very-magic uses bare %(...) and unbackslashed < > (there, \<
+            -- matches a LITERAL '<'). The inner group keeps user \1..\9
+            -- unshifted and bounds a top-level alternation, matching
+            -- rg --word-regexp's \b(?:P)\b semantics.
+            pat = [[\v%(<%(]] .. params.pattern .. [[)>)]]
+        else
+            pat = [[\V\%(\<]] .. vim.fn.escape(params.pattern, [[\\]]) .. [[\>\)]]
+        end
+    elseif params.regex then
         pat = [[\v]] .. params.pattern
     else
         pat = [[\V]] .. vim.fn.escape(params.pattern, [[\\]])

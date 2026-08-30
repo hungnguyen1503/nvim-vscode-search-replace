@@ -54,16 +54,24 @@ function M.create(opts)
         replacement = "",
         regex = false,
         case_sensitive = false,
+        whole_word = false,
         include = "",
         path = opts.path,
     }
     -- checkbox signs repaint only through reactive props: Component:set_current_value
     -- does not redraw; a `value = <SignalValue>` prop makes the popup re-render.
-    local toggles = n.create_signal({ case = false, regex = false })
+    local toggles = n.create_signal({ case = false, regex = false, whole = false, replace = false })
+    -- Fresh instance per consumer: :map mutates the SignalValue it is called on.
+    local function hidden_unless_replace()
+        return toggles.replace:dup():map(function(v)
+            return not v
+        end)
+    end
     local tree_data = {}
     local last_res = nil
     local close, schedule, run_search, render_results
     local tree_comp
+    local attach_panel_maps
 
     close = function()
         if closed then
@@ -280,9 +288,13 @@ function M.create(opts)
         debounce_timer:start(cfg.debounce, 0, vim.schedule_wrap(run_search))
     end
 
+    -- flex=1: it lives inside the horizontal columns row now (with the four
+    -- checkboxes), so it needs to claim the leftover width; without it the
+    -- bordered input collapses to a 3x3 box.
     local ti_search = n.text_input({
         autofocus = true,
         max_lines = 1,
+        flex = 1,
         border_label = "Search",
         placeholder = "search text",
         value = opts.pattern or "",
@@ -294,6 +306,8 @@ function M.create(opts)
     local cb_case = n.checkbox({
         label = "Aa",
         value = toggles.case,
+        global_press_key = "<A-c>",
+        padding = { top = 1 },
         on_change = function(value)
             params.case_sensitive = value
             toggles.case = value
@@ -303,15 +317,45 @@ function M.create(opts)
     local cb_regex = n.checkbox({
         label = ".*",
         value = toggles.regex,
+        global_press_key = "<A-r>",
+        padding = { top = 1 },
         on_change = function(value)
             params.regex = value
             toggles.regex = value
             schedule()
         end,
     })
+    -- ab is ALWAYS mounted (VS Code keeps its whole-word button permanent):
+    -- showing/hiding it would re-flow the flex row and resize the search box
+    -- on every mode switch, which is exactly what a find widget must not do.
+    local cb_whole = n.checkbox({
+        label = "ab",
+        value = toggles.whole,
+        global_press_key = "<A-w>",
+        padding = { top = 1 },
+        on_change = function(value)
+            params.whole_word = value
+            toggles.whole = value
+            schedule()
+        end,
+    })
+    local cb_mode = n.checkbox({
+        label = "Replace",
+        value = toggles.replace,
+        padding = { top = 1 },
+        on_change = function(value)
+            toggles.replace = value
+            -- Re-attach Alt/? maps so the freshly visible widgets participate.
+            -- defer (not schedule): the renderer recomputes its focusable list
+            -- in its OWN queued redraw; attaching one tick later sees the new
+            -- widgets instead of the stale pre-toggle list.
+            vim.defer_fn(attach_panel_maps, 60)
+        end,
+    })
     local ti_replace = n.text_input({
         border_label = "Replace",
         max_lines = 1,
+        hidden = hidden_unless_replace(),
         on_change = function(value)
             params.replacement = value
             schedule()
@@ -369,29 +413,34 @@ function M.create(opts)
     local btn_replace = n.button({
         label = "Replace All",
         global_press_key = "<C-R>",
+        hidden = hidden_unless_replace(),
         on_press = replace_all,
     })
 
+    -- 50/50 split: the search row (ab + input + Aa + .* + Replace) needs the
+    -- sidebar wide enough that flex=1 still leaves a usable input at ~80-col
+    -- terminals; the tree truncates gracefully.
     local sidebar = n.form(
-        { flex = 40 },
-        ti_search,
+        { flex = 50 },
         n.columns(
             { flex = 0, size = 1 },
+            cb_whole,
+            ti_search,
+            -- one blank column keeps every toggle clear of the search border
+            n.gap(1),
             cb_case,
             n.gap(1),
-            cb_regex
+            cb_regex,
+            n.gap(1),
+            cb_mode
         ),
         ti_replace,
         ti_include,
-        n.columns(
-            { flex = 0 },
-            btn_replace
-        )
+        btn_replace
     )
 
     local status_par = n.paragraph({ lines = status.text, is_focusable = false, size = 1 })
-    local right = n.rows({ flex = 60 }, status_par, tree_comp)
-
+    local right = n.rows({ flex = 50 }, status_par, tree_comp)
     -- flex=1 REQUIRED: columns() with props lacking size/flex treats the props
     -- table itself as a child (nui-components init.lua normalize_layout_props)
     renderer:render(n.columns({ flex = 1 }, sidebar, right))
@@ -427,30 +476,102 @@ function M.create(opts)
     -- Alt key would leak ESC+char into the focused widget).
     -- nui's Popup:map takes a single mode STRING (nui/utils/keymap.lua:112),
     -- unlike renderer:add_mappings which accepts mode tables.
-    local list = renderer:get_focusable_components()
-    for idx, c in ipairs(list) do
-        local next_c = list[idx + 1] or list[1]
-        local prev_c = list[idx - 1] or list[#list]
-        for _, m in ipairs({ "n", "i" }) do
-            c:map(m, "<A-j>", function()
-                focus_component(next_c)
-            end, { noremap = true })
-            c:map(m, "<A-k>", function()
-                focus_component(prev_c)
-            end, { noremap = true })
-            -- h and l both switch columns: sidebar -> tree, tree -> last field
-            c:map(m, "<A-l>", function()
-                focus_component(tree_comp)
-            end, { noremap = true })
-            c:map(m, "<A-h>", function()
-                if c == tree_comp then
-                    focus_component(last_field)
-                else
-                    focus_component(tree_comp)
-                end
-            end, { noremap = true })
+    local ns_help = vim.api.nvim_create_namespace("vscode-search-replace-help")
+    local HELP_HEADER = "vscode-search-replace — keymaps"
+    local HELP_KEYS = {
+        { "<Tab> / <S-Tab>", "next / previous panel" },
+        { "Alt+h / Alt+l", "sidebar <-> results tree" },
+        { "Alt+j / Alt+k", "previous / next panel" },
+        { "Enter / Space", "activate widget / jump to match" },
+        { "Alt+C", "toggle Aa  match case" },
+        { "Alt+W", "toggle ab  whole word" },
+        { "Alt+R", "toggle .*  regular expression" },
+        { "Ctrl+R", "Replace All (asks for confirm)" },
+        { "Replace checkbox", "show/hide replace field + Replace All" },
+        { "? / q / <Esc>", "hide this help" },
+    }
+    local help_buf, help_win = nil, nil
+    local function close_help()
+        if help_win and vim.api.nvim_win_is_valid(help_win) then
+            vim.api.nvim_win_close(help_win, true)
+        end
+        help_win, help_buf = nil, nil
+    end
+    local function toggle_help(back_win)
+        if help_win and vim.api.nvim_win_is_valid(help_win) then
+            close_help()
+            if back_win and vim.api.nvim_win_is_valid(back_win) then
+                vim.api.nvim_set_current_win(back_win)
+            end
+            return
+        end
+        help_buf = vim.api.nvim_create_buf(false, true)
+        vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = help_buf })
+        local lines = { HELP_HEADER, "" }
+        for _, entry in ipairs(HELP_KEYS) do
+            table.insert(lines, ("%-24s%s"):format(entry[1], entry[2]))
+        end
+        local w, h = 62, #lines + 2
+        help_win = vim.api.nvim_open_win(help_buf, true, {
+            relative = "editor",
+            row = math.floor((vim.o.lines - h) / 2),
+            col = math.floor((vim.o.columns - w) / 2),
+            width = w,
+            height = h,
+            border = "rounded",
+            style = "minimal",
+            zindex = 300,
+        })
+        vim.api.nvim_buf_set_lines(help_buf, 0, -1, false, lines)
+        vim.api.nvim_buf_set_extmark(help_buf, ns_help, 0, 0, { end_col = #HELP_HEADER, hl_group = "Label" })
+        for _, k in ipairs({ "?", "q", "<Esc>", "i" }) do
+            vim.keymap.set("n", k, function()
+                toggle_help(back_win)
+            end, { buffer = help_buf, nowait = true })
         end
     end
+
+    -- Walk by LIVE index (renderer recomputes get_focusable_components() on
+    -- every redraw) instead of captured next/prev closures: a widget shown or
+    -- hidden after the last attach can then never be skipped or mis-wired.
+    -- attach_panel_maps still re-registers maps on freshly visible components
+    -- (c:map re-registration is idempotent).
+    local function sibling(cur, dir)
+        local list = renderer:get_focusable_components()
+        for i, x in ipairs(list) do
+            if x == cur then
+                return list[(i - 1 + dir) % #list + 1]
+            end
+        end
+        return list[1]
+    end
+    attach_panel_maps = function()
+        for _, c in ipairs(renderer:get_focusable_components()) do
+            c:map("n", "?", function()
+                toggle_help(c.winid)
+            end, { noremap = true })
+            for _, m in ipairs({ "n", "i" }) do
+                c:map(m, "<A-j>", function()
+                    focus_component(sibling(c, 1))
+                end, { noremap = true })
+                c:map(m, "<A-k>", function()
+                    focus_component(sibling(c, -1))
+                end, { noremap = true })
+                -- h and l both switch columns: sidebar -> tree, tree -> last field
+                c:map(m, "<A-l>", function()
+                    focus_component(tree_comp)
+                end, { noremap = true })
+                c:map(m, "<A-h>", function()
+                    if c == tree_comp then
+                        focus_component(last_field)
+                    else
+                        focus_component(tree_comp)
+                    end
+                end, { noremap = true })
+            end
+        end
+    end
+    attach_panel_maps()
 
     -- prefill from cword/selection: search immediately, skip the debounce
     if params.pattern ~= "" then
