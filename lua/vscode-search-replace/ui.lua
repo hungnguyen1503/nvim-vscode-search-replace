@@ -20,6 +20,9 @@ function M.create(opts)
     end
     local closed = false
     local debounce_timer
+    -- forward: the Replace All dialog must die with the panel (on_unmount)
+    local confirm_buf, confirm_win
+    local close_confirm
     local renderer = n.create_renderer({
         width = dim(cfg.width, vim.o.columns),
         height = dim(cfg.height, vim.o.lines),
@@ -38,6 +41,7 @@ function M.create(opts)
                 debounce_timer:stop()
             end
             engine.cancel()
+            close_confirm()
             opts.on_closed()
         end,
     })
@@ -55,12 +59,13 @@ function M.create(opts)
         regex = false,
         case_sensitive = false,
         whole_word = false,
+        preserve_case = false,
         include = "",
         path = opts.path,
     }
     -- the toggle FILL repaints through reactive props: an `is_active =
     -- <SignalValue>` prop re-renders the button whenever the field is written.
-    local toggles = n.create_signal({ case = false, regex = false, whole = false, replace = false })
+    local toggles = n.create_signal({ case = false, regex = false, whole = false, replace = false, preserve = false })
     -- Fresh instance per consumer: :map mutates the SignalValue it is called on.
     local function hidden_unless_replace()
         return toggles.replace:dup():map(function(v)
@@ -74,11 +79,177 @@ function M.create(opts)
     local attach_panel_maps
     local toggle_help
 
+    -- ── Mouse support ──────────────────────────────────────────────────────
+    -- nvim resolves a mouse release against the buffer of the window that is
+    -- CURRENT at release time; the press focuses natively, but while the
+    -- panel is mid-repaint (a search result re-render) that focus move is
+    -- deferred and the release arrives on the PREVIOUS component's buffer.
+    -- So: every armed buffer carries the SAME dispatcher, and the dispatcher
+    -- resolves the hit by mouse POSITION (window id first, then buffer
+    -- identity, which survives popup re-creation) — never by which buffer's
+    -- map happened to fire. (Extmark "buttons" are NOT an API; probed live.)
+    local click_targets = {}
+    local function dispatch_release()
+        local mp = vim.fn.getmousepos()
+        for i = #click_targets, 1, -1 do
+            local tgt = click_targets[i]
+            local comp = tgt.comp
+            local ok = false
+            if comp.winid and vim.api.nvim_win_is_valid(comp.winid) then
+                ok = mp.winid == comp.winid
+            end
+            if not ok and comp.bufnr and vim.api.nvim_win_is_valid(mp.winid) then
+                ok = vim.api.nvim_win_get_buf(mp.winid) == comp.bufnr
+            end
+            if ok then
+                tgt.fire(mp)
+                return
+            end
+        end
+    end
+    local function arm_mouse(comp, fire)
+        for i = #click_targets, 1, -1 do
+            if click_targets[i].comp == comp then
+                table.remove(click_targets, i)
+            end
+        end
+        table.insert(click_targets, { comp = comp, fire = fire })
+        vim.keymap.set({ "n", "i" }, "<LeftRelease>", dispatch_release, {
+            buffer = comp.bufnr,
+            noremap = true,
+        })
+    end
+    -- Fire an action only once `comp`'s window is actually current (the
+    -- native press focus move may still be pending during a repaint).
+    local function when_focused(comp, action)
+        local tries = 0
+        local function go()
+            tries = tries + 1
+            if comp.winid and vim.api.nvim_win_is_valid(comp.winid)
+                and vim.api.nvim_get_current_win() == comp.winid then
+                action()
+            elseif tries < 100 then
+                vim.schedule(go)
+            end
+        end
+        vim.schedule(go)
+    end
+    -- Text inputs: the click already placed the cursor natively; just make
+    -- sure typing can start (the release may arrive in normal mode, or with
+    -- the focus move still queued behind a repaint).
+    local function arm_input(comp)
+        arm_mouse(comp, function()
+            when_focused(comp, function()
+                if vim.fn.mode():sub(1, 1) ~= "i" then
+                    vim.cmd("startinsert!")
+                end
+            end)
+        end)
+    end
+
     close = function()
         if closed then
             return
         end
         renderer:close()
+    end
+    -- ── Replace All confirmation (Yes/No dialog) ───────────────────────────
+    -- vim.fn.confirm sits on the command line with Yes/Cancel and has no
+    -- mouse support; this floats a real dialog above the panel, keyboard
+    -- (y/n, Enter/Esc) AND clickable (its box borders are buffer TEXT, so
+    -- even them the whole 3-line box is a hit target).
+    close_confirm = function()
+        if confirm_win and vim.api.nvim_win_is_valid(confirm_win) then
+            vim.api.nvim_win_close(confirm_win, true)
+        end
+        confirm_buf, confirm_win = nil, nil
+    end
+    local function open_confirm(msg, on_yes)
+        if confirm_win and vim.api.nvim_win_is_valid(confirm_win) then
+            return
+        end
+        local gap = 4
+        local boxes = 5 + gap + 4
+        local w = math.max(#msg, boxes + 2)
+        local yes_x = math.floor((w - boxes) / 2)
+        local no_x = yes_x + 5 + gap
+        local function pad(s)
+            return s .. (" "):rep(math.max(0, w - #s))
+        end
+        local lines = {
+            pad(msg),
+            (" "):rep(w),
+            pad((" "):rep(yes_x) .. "╭───╮" .. (" "):rep(gap) .. "╭──╮"),
+            pad((" "):rep(yes_x) .. "│Yes│" .. (" "):rep(gap) .. "│No│"),
+            pad((" "):rep(yes_x) .. "╰───╯" .. (" "):rep(gap) .. "╰──╯"),
+        }
+        confirm_buf = vim.api.nvim_create_buf(false, true)
+        vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = confirm_buf })
+        local back = vim.api.nvim_get_current_win()
+        local hh = #lines + 2
+        confirm_win = vim.api.nvim_open_win(confirm_buf, true, {
+            relative = "editor",
+            row = math.floor((vim.o.lines - hh) / 2),
+            col = math.floor((vim.o.columns - (w + 2)) / 2),
+            width = w,
+            height = #lines,
+            border = "rounded",
+            style = "minimal",
+            zindex = 300,
+        })
+        vim.api.nvim_buf_set_lines(confirm_buf, 0, -1, false, lines)
+        -- enter=true is ignored when we are called from a mouse-release
+        -- handler (nvim refuses focus changes inside mapping callbacks), so
+        -- the dialog's own buffer-local key/LeftRelease maps would never be
+        -- the lookup context. Claim focus as soon as the handler unwinds.
+        vim.schedule(function()
+            if confirm_win and vim.api.nvim_win_is_valid(confirm_win) then
+                pcall(vim.api.nvim_set_current_win, confirm_win)
+            end
+        end)
+        local function answer(yes)
+            close_confirm()
+            if back and vim.api.nvim_win_is_valid(back) then
+                vim.api.nvim_set_current_win(back)
+            end
+            if yes then
+                on_yes()
+            end
+        end
+        for _, k in ipairs({ "y", "Y", "<CR>" }) do
+            vim.keymap.set("n", k, function()
+                answer(true)
+            end, { buffer = confirm_buf, nowait = true })
+        end
+        for _, k in ipairs({ "n", "N", "q", "<Esc>" }) do
+            vim.keymap.set("n", k, function()
+                answer(false)
+            end, { buffer = confirm_buf, nowait = true })
+        end
+        vim.keymap.set({ "n", "i" }, "<LeftRelease>", function()
+            local mp = vim.fn.getmousepos()
+            local wi = confirm_win and vim.api.nvim_win_is_valid(confirm_win)
+                and vim.fn.getwininfo(confirm_win)[1]
+            if not wi or mp.winid ~= confirm_win then
+                return
+            end
+            -- getmousepos().line/column mis-map cells once a row contains
+            -- ambiguous-width box glyphs (U+2500 family), so hit-test in
+            -- SCREEN cells instead: winrow/wincol are the 1-based window
+            -- origin (border cell), so r/c equal buffer row/col + 1. The
+            -- boxes occupy visual rows 3..5, Yes cols yes_x+1..yes_x+5,
+            -- No cols no_x+1..no_x+4.
+            local r = mp.screenrow - wi.winrow
+            local c = mp.screencol - wi.wincol
+            if r < 3 or r > 5 then
+                return
+            end
+            if c >= yes_x + 1 and c < yes_x + 6 then
+                answer(true)
+            elseif c >= no_x + 1 and c < no_x + 5 then
+                answer(false)
+            end
+        end, { buffer = confirm_buf, noremap = true })
     end
     local function replace_all()
         if params.pattern == "" or params.replacement == "" or not last_res or last_res.total == 0 then
@@ -86,21 +257,20 @@ function M.create(opts)
             return
         end
         local prompt = ("Replace %d matches in %d files?"):format(last_res.total, #last_res.files)
-        if vim.fn.confirm(prompt, "&Yes\n&Cancel", 2) ~= 1 then
-            return
-        end
-        local r = engine.apply(last_res, params)
-        local skipped = {}
-        for _, f in ipairs(r.failed or {}) do
-            table.insert(skipped, f.path .. " (" .. f.reason .. ")")
-        end
-        vim.notify(
-            ("vscode-search-replace: replaced in %d file(s)%s"):format(
-                #(r.written or {}),
-                #skipped > 0 and ("; skipped: " .. table.concat(skipped, ", ")) or ""
+        open_confirm(prompt, function()
+            local r = engine.apply(last_res, params)
+            local skipped = {}
+            for _, f in ipairs(r.failed or {}) do
+                table.insert(skipped, f.path .. " (" .. f.reason .. ")")
+            end
+            vim.notify(
+                ("vscode-search-replace: replaced in %d file(s)%s"):format(
+                    #(r.written or {}),
+                    #skipped > 0 and ("; skipped: " .. table.concat(skipped, ", ")) or ""
+                )
             )
-        )
-        run_search()
+            run_search()
+        end)
     end
 
     local function on_select(node, component)
@@ -199,6 +369,27 @@ function M.create(opts)
         -- flex required: Tree defaults to size=1 (one content row) and Size:get
         -- only consults flex when present (component/size.lua:253)
         flex = 1,
+        -- click a result row to select it: resolve the clicked buffer line
+        -- to its tree node and run the real select action (see below).
+        on_mount = function(self)
+            arm_mouse(self, function(mp)
+                when_focused(self, function()
+                    -- A click does not move the tree's STORED focused
+                    -- node (only key navigation does), and synthesizing
+                    -- <CR> would activate that stale node — resolve the
+                    -- clicked buffer line to its node and select it.
+                    local tree = self:get_tree()
+                    local node = tree and tree:get_node(math.max(1, mp.line))
+                    if node then
+                        self:set_focused_node(node)
+                        local actions = self:get_actions()
+                        if actions and actions.on_select then
+                            actions.on_select()
+                        end
+                    end
+                end)
+            end)
+        end,
     })
 
     render_results = function(res)
@@ -303,6 +494,9 @@ function M.create(opts)
             params.pattern = value
             schedule()
         end,
+        on_mount = function(self)
+            arm_input(self)
+        end,
     })
     -- VS Code find-widget look: every toggle is a small rounded box whose
     -- interior FILLS while the option is ON. nui-components Button paints
@@ -315,22 +509,30 @@ function M.create(opts)
     vim.api.nvim_set_hl(0, "NuiComponentsButtonFocused", { underline = true, default = true })
 
     -- field = toggles key; param = params key the engine reads (nil for the
-    -- replace-mode button, which only reveals widgets).
-    local function toggle_button(field, param, label, key, extra)
+    -- replace-mode button, which only reveals widgets); guard = predicate
+    -- that blocks the GLOBAL hotkey while the box itself is hidden.
+    local function toggle_button(field, param, label, key, extra, guard)
+        local function press()
+            if guard and not guard() then
+                return
+            end
+            local value = not toggles:get_value()[field]
+            toggles[field] = value
+            if param then
+                params[param] = value
+            end
+            if extra then
+                extra(value)
+            end
+        end
         return n.button({
             label = label,
             border_style = "rounded",
             is_active = toggles[field],
             global_press_key = key,
-            on_press = function()
-                local value = not toggles:get_value()[field]
-                toggles[field] = value
-                if param then
-                    params[param] = value
-                end
-                if extra then
-                    extra(value)
-                end
+            on_press = press,
+            on_mount = function(self)
+                arm_mouse(self, press)
             end,
         })
     end
@@ -341,9 +543,15 @@ function M.create(opts)
     -- on every mode switch, which is exactly what a find widget must not do.
     local tb_whole = toggle_button("whole", "whole_word", "ab", "<A-w>", schedule)
     -- The replace-mode toggle is an ICON box (VS Code shows a chevron there,
-    -- not the word): ⇄ sits LEFT of Search and reveals/hides the replace
-    -- widgets; the replace TEXT field below keeps its "Replace" border label.
-    local tb_mode = toggle_button("replace", nil, "⇄", nil, function()
+    -- not the word): ⇄ sits LEFT of Search and reveals/hides the replace ROW
+    -- (Replace input · AB · ⇉). Leaving replace mode also drops
+    -- preserve-case so a hidden box can never silently reshape replacements.
+    local tb_mode = toggle_button("replace", nil, "⇄", nil, function(value)
+        if not value and toggles:get_value().preserve then
+            toggles.preserve = false
+            params.preserve_case = false
+            schedule()
+        end
         -- Re-attach Alt/? maps so the freshly visible widgets participate.
         -- defer (not schedule): the renderer recomputes its focusable list
         -- in its OWN queued redraw; attaching one tick later sees the new
@@ -358,14 +566,29 @@ function M.create(opts)
         on_press = function(self)
             toggle_help(self.winid)
         end,
+        on_mount = function(self)
+            arm_mouse(self, function()
+                toggle_help(self.winid)
+            end)
+        end,
     })
+    -- VS Code's preserve-case ("AB") box lives in the REPLACE ROW (hidden
+    -- with it); its Alt+P hotkey is guarded because global_press_key also
+    -- fires while the row is hidden.
+    local tb_preserve = toggle_button("preserve", "preserve_case", "AB", "<A-p>", schedule, function()
+        return toggles:get_value().replace
+    end)
     local ti_replace = n.text_input({
         border_label = "Replace",
         max_lines = 1,
-        hidden = hidden_unless_replace(),
+        -- flex=1: shares the replace row with the AB and ⇉ boxes
+        flex = 1,
         on_change = function(value)
             params.replacement = value
             schedule()
+        end,
+        on_mount = function(self)
+            arm_input(self)
         end,
     })
     local ti_include = n.text_input({
@@ -375,6 +598,9 @@ function M.create(opts)
         on_change = function(value)
             params.include = value
             schedule()
+        end,
+        on_mount = function(self)
+            arm_input(self)
         end,
     })
 
@@ -417,17 +643,23 @@ function M.create(opts)
     shield_text_input(ti_search)
     shield_text_input(ti_replace)
     shield_text_input(ti_include)
+    -- Replace All becomes the VS Code-style double-arrow ICON box ⇉; it
+    -- lives in the replace row and asks a Yes/No dialog before applying.
     local btn_replace = n.button({
-        label = "Replace All",
+        label = "⇉",
         border_style = "rounded",
         global_press_key = "<C-R>",
-        hidden = hidden_unless_replace(),
         on_press = replace_all,
+        on_mount = function(self)
+            arm_mouse(self, replace_all)
+        end,
     })
 
     -- 50/50 split: the search row (⇄ + input + ab + Aa + .* + ?) needs the
     -- sidebar wide enough that flex=1 still leaves a usable input at ~80-col
-    -- terminals; the tree truncates gracefully.
+    -- terminals; the tree truncates gracefully. The replace row hides as a
+    -- WHOLE ROW (is_hidden walks the parent chain, so its children leave the
+    -- layout AND the Tab cycle with it — no blank row while search-only).
     local sidebar = n.form(
         { flex = 50 },
         n.columns(
@@ -445,9 +677,15 @@ function M.create(opts)
             n.gap(1),
             tb_help
         ),
-        ti_replace,
-        ti_include,
-        btn_replace
+        n.columns(
+            { flex = 0, size = 1, hidden = hidden_unless_replace() },
+            ti_replace,
+            n.gap(1),
+            tb_preserve,
+            n.gap(1),
+            btn_replace
+        ),
+        ti_include
     )
 
     local status_par = n.paragraph({ lines = status.text, is_focusable = false, size = 1 })
@@ -493,12 +731,14 @@ function M.create(opts)
         { "<Tab> / <S-Tab>", "next / previous panel" },
         { "Alt+h / Alt+l", "sidebar <-> results tree" },
         { "Alt+j / Alt+k", "previous / next panel" },
-        { "Enter / Space", "activate widget / jump to match" },
+        { "Enter / Space / click", "activate widget · jump to match" },
         { "Alt+C", "toggle Aa  match case" },
         { "Alt+W", "toggle ab  whole word" },
         { "Alt+R", "toggle .*  regular expression" },
-        { "Ctrl+R", "Replace All (asks for confirm)" },
-        { "⇄ button", "show/hide replace field + Replace All" },
+        { "Alt+P", "toggle AB  preserve case (replace row)" },
+        { "Ctrl+R", "Replace All — asks for confirmation" },
+        { "⇄ box", "show/hide the replace row (Replace · AB · ⇉)" },
+        { "⇉ box", "Replace All (Yes/No dialog)" },
         { "? / q / <Esc>", "show/hide this help (? box too)" },
     }
     local help_buf, help_win = nil, nil
@@ -525,7 +765,7 @@ function M.create(opts)
             local key, desc = entry[1], entry[2]
             table.insert(lines, key .. (" "):rep(math.max(1, 24 - vim.fn.strwidth(key))) .. desc)
         end
-        local w, h = 62, #lines + 2
+        local w, h = 70, #lines + 2
         help_win = vim.api.nvim_open_win(help_buf, true, {
             relative = "editor",
             row = math.floor((vim.o.lines - h) / 2),

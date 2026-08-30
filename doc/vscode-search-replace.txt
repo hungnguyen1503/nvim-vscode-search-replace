@@ -1,6 +1,6 @@
 *vscode-search-replace.txt*                       VSCode Search & Replace
 
-                                                    For Neovim   Last change: 2026 August 30
+                                                    For Neovim   Last change: 2026 August 31
 
 ==============================================================================
 Table of Contents                                  *vscode-search-replace-tox*
@@ -27,12 +27,15 @@ on <https://github.com/grapp-dev/nui-components.nvim>.
   - inline `ab` whole-word, `Aa` case and `.*` regex toggles on the search
     row, plus a Files-to-Include path/glob filter
   - the float opens search-only; pressing the `⇄` box (left of the pattern
-    field) reveals the replace field and the `Replace All` button — the
-    search box keeps a fixed width
+    field) reveals the replace row — replace field, `AB` preserve-case box
+    and the `⇉` Replace All icon box — the search box keeps a fixed width
+  - every box, field and button is mouse-clickable: click a field to type,
+    click a box to toggle it, click `Yes`/`No` in the confirmation dialog
   - whole-project, current-file and word/visual-selection search variants
-  - `<CR>` jumps to the match, `<C-R>` replaces everywhere
-  - `Alt+h/j/k/l` + `Tab` panel navigation and `Alt+c/w/r` hotkeyed toggles;
-    the plugin ships no global keymaps
+  - `<CR>` jumps to the match, `<C-R>` replaces everywhere after a Yes/No
+    confirmation dialog
+  - `Alt+h/j/k/l` + `Tab` panel navigation and `Alt+c/w/r/p` hotkeyed
+    toggles; the plugin ships no global keymaps
   - `?` in normal mode shows the keymap help overlay
 
 ==============================================================================
@@ -101,20 +104,38 @@ Keys inside the float: ~
     <Esc>/<Esc>     close (first <Esc> leaves insert mode in a focused input)
     q               close (normal mode)
     <CR>            activate the focused widget · jump to the selected match
-    <C-R>           Replace All (asks `(Y)es [C]ancel` first)
+    click           same as <CR>/Space on boxes and fields; focuses inputs
+    <C-R>           Replace All — opens a Yes/No confirmation dialog
     Alt+c           toggle `Aa` match case
     Alt+w           toggle `ab` whole word
     Alt+r           toggle `.*` regular expression
+    Alt+p           toggle `AB` preserve case (replace mode only)
     Alt+h/Alt+l     move to the previous/next panel column
     Alt+j/Alt+k     move to the next/previous panel in a column
     ?               show/hide the keymap help overlay (or press the ? box)
 
     The toggle boxes fill (reverse video) while their option is active.
     Focus order: `⇄` -> Search -> `ab` -> `Aa` -> `.*` -> `?` -> Replace
-    input -> Files to Include -> Replace All -> results tree. The Replace
-    input and Replace All button are skipped (hidden, not focusable) while
-    the `⇄` box is inactive; pressing it (`Enter`/`Space`) shows them,
-    pressing again hides them. The search box never resizes between modes.
+    input -> `AB` -> `⇉` -> Files to Include -> results tree. The Replace
+    row is hidden (not focusable, and `AB` cannot take effect) while the
+    `⇄` box is inactive; pressing it (`Enter`/`Space`/click) shows it,
+    pressing again hides it — and hides `AB` with it. The search box never
+    resizes between modes.
+
+Replace All confirmation: ~
+    `⇉` or `<C-R>` first floats a modal dialog asking "Replace N matches in
+    M files?". Answer with `y`/`Y` or `<CR>` (yes), `n`/`N`/`q`/`<Esc>` (no),
+    or by clicking the `Yes` / `No` boxes. Nothing is written before you
+    confirm; the dialog never touches files by itself.
+
+Preserve case (`AB`): ~
+    When active, every replacement re-cases itself to the text it replaced:
+    an ALL-CAPS match gets an ALL-CAPS replacement, a Title-case match a
+    Title-case one (`foo` -> `bar`, `FOO` -> `BAR`, `Foo` -> `Bar`);
+    mixed-case matches are replaced verbatim. The replacement's own
+    case-code escapes (`\u`, `\U`, `\l`, `\L`) are not applied while `AB`
+    is on — the match decides the case. A bare `&` or `%` in the
+    replacement is literal in both modes.
 
 Search fields: ~
     Search              ripgrep pattern (literal unless `.*` is on)
@@ -126,6 +147,9 @@ Search fields: ~
     Replace             replacement text; `\0`–`\9` are capture references in
                         regex mode. Empty → no diff preview, Replace All is a
                         no-op.
+    AB                  preserve-case toggle box (replace row): replacements
+                        adopt the case shape of each match (see above)
+    ⇉                   Replace All icon box — asks for confirmation first
     Files to Include    comma-separated globs (`*.lua`) or paths (`src`,
                         searched recursively as `src/**`). Empty = all files.
 

@@ -18,7 +18,7 @@ UI with live results, inline diff previews, and ripgrep speed. Built on
   </tr>
   <tr>
     <td align="center">
-      <img src="img/preview.png" alt="The Search and Replace float in replace mode: the ⇄ toggle box left of the fixed-width pattern field, ab, Aa and .* boxes to its right, then the ? help box — active toggles filled — plus the Replace field, Files-to-Include filter and Replace All button, with a ripgrep results tree showing every match and its old/new line" width="88%">
+      <img src="img/preview.png" alt="The Search and Replace float in replace mode: the ⇄ toggle box left of the fixed-width pattern field, ab, Aa and .* boxes to its right, then the ? help box — active toggles filled — plus the Replace field with the AB preserve-case box and the ⇉ Replace All icon box, the Files-to-Include filter and a ripgrep results tree showing every match and its old/new line" width="88%">
     </td>
   </tr>
 </table>
@@ -27,15 +27,20 @@ UI with live results, inline diff previews, and ripgrep speed. Built on
 
 - 🔍 live debounced results while you type (ripgrep)
 - 🎨 inline red/green diff preview per match, with `\1`–`\9` capture references
-- 🧩 bordered `⇄` / `ab` / `Aa` / `.*` toggle boxes around the search field —
-  they fill while active; `Tab` + `Enter`, or `Alt+w` / `Alt+c` / `Alt+r`
-  from anywhere in the float
+- 🧩 bordered `⇄` / `ab` / `Aa` / `.*` / `AB` toggle boxes —
+  they fill while active; `Tab` + `Enter`, `Alt+w` / `Alt+c` / `Alt+r` /
+  `Alt+p` from anywhere in the float, or just click them with the mouse
 - 🔎 search-only to start; pressing the `⇄` box left of Search reveals the
-  replace field and the `Replace All` button — the search box never resizes,
-  VS Code find-widget style
+  replace row — `[Replace field] AB ⇉` — the search box never resizes,
+  VS Code find-widget style; `AB` is `Preserve case`, `⇉` is Replace All
+- 🖱️ every box, field and button is mouse-clickable (click a field to type,
+  click a box to toggle it), VS Code style
+- ✅ Replace All asks first with a Yes/No dialog (`y`/`n`, `Enter`/`Esc`, or
+  click) before touching any file
 - ❓ press `?` (or the `?` box on the search row) for the full keymap list
 - 📂 current-file and word-under-cursor / visual-selection search variants
-- ⚡ `<CR>` jumps straight to the match · `<C-R>` replaces everywhere
+- ⚡ `<CR>` jumps straight to the match · `<C-R>` replaces everywhere (with a
+  Yes/No confirmation)
 - ⌨️ panel navigation with `Alt+h/j/k/l` — no plugin keymaps stolen from you
 
 ## ⚡️ Requirements
@@ -115,26 +120,38 @@ require("vscode-search-replace").open({ file = true, word = true })
 ```
 
 The float opens in search-only mode; press the `⇄` box (left of Search) to show
-the replace field and the `Replace All` button.
+the replace row: the replace field, the `AB` (Preserve case) box and the `⇉`
+(Replace All) icon box.
+
+### Preserve case (`AB`)
+
+When on, each replacement re-cases itself to the text it replaced: an ALL-CAPS
+match gets an ALL-CAPS replacement, a Title-case match gets a Title-case one
+(`foo` → `bar`, `FOO` → `BAR`, `Foo` → `Bar`); mixed-case matches are left as
+typed. Case-code escapes in the replacement (`\u`, `\U`, `\l`, `\L`) are not
+applied while `AB` is on — the match decides the case — and a bare `&` or `%`
+in the replacement inserts itself literally.
 
 Troubleshooting: `:checkhealth vscode-search-replace`
 
 ## ⌨️ Keymaps
 
-Every panel is reachable — `Tab`/`Shift+Tab` or `Alt+j`/`Alt+k` to walk, `Enter`/`Space`
-to activate — and the `Alt` hotkeys work from wherever focus is. Press `?` inside the float
-to see this list.
+Every panel is reachable — `Tab`/`Shift+Tab` or `Alt+j`/`Alt+k` to walk,
+`Enter`/`Space` or a mouse click to activate — and the `Alt` hotkeys work from
+wherever focus is. Press `?` inside the float to see this list.
 
 | Keymap                | Mode  | Description                                      |
 | --------------------- | ----- | ------------------------------------------------ |
 | `<Tab>` / `<S-Tab>`   | n/i   | next / previous panel                            |
 | `Alt+h` / `Alt+l`     | n/i   | sidebar ⇄ results tree                           |
 | `Alt+j` / `Alt+k`     | n/i   | previous / next panel in focus order             |
-| `Enter` / `Space`     | n     | activate focused widget · jump to selected match |
+| `Enter` / `Space` / click | n/i | activate focused widget · jump to selected match |
 | `Alt+c`               | n/i   | toggle `Aa` — match case                         |
 | `Alt+w`               | n/i   | toggle `ab` — match whole word                   |
 | `Alt+r`               | n/i   | toggle `.*` — regular expression                 |
-| `Ctrl+r`              | n/i   | Replace All (asks `(Y)es [C]ancel`)              |
+| `Alt+p`               | n/i   | toggle `AB` — preserve case                      |
+| `Ctrl+r`              | n/i   | Replace All — asks Yes/No first                  |
+| `y` / `n` · `Enter` / `Esc` | n | answer the Replace All dialog (or click `Yes`/`No`) |
 | `?`                   | n     | show/hide the keymap help                        |
 | `q` / `Esc` / `<C-f>` | n/i   | close                                            |
 

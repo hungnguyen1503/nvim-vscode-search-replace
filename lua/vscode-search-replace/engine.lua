@@ -7,6 +7,7 @@
 --   regex           = boolean,  -- false → -F / \V literal
 --   case_sensitive  = boolean,  -- false → -i / \c
 --   whole_word      = boolean,  -- false → no -w / no word-boundary wrap
+--   preserve_case   = boolean,  -- adapt the replacement to each match's casing
 --   include         = string,   -- comma-separated paths/globs; "" = all
 --   path            = string,   -- absolute search root (cwd at open)
 
@@ -115,6 +116,102 @@ function M.to_vim_repl(repl)
     return s
 end
 
+--- Vim substitute() replacement specials expanded against one match.
+--- Mirrors the plain (non-preserve) path exactly: the plain path runs
+--- to_vim_repl() first, so a literal '%' or '&' from the user is ALWAYS
+--- literal here too; recognised escapes are \\ \n \r \t and the \0..\9
+--- back-references; any other \X yields the literal X; a lone trailing
+--- backslash stays literal. Byte-wise scan is UTF-8 safe (the split
+--- characters are ASCII-only).
+---@param raw string   -- user replacement, unescaped
+---@param full string  -- submatch(0)
+---@param caps string[] -- submatch(1..9) ("" for non-participating)
+---@return string
+function M.expand_repl(raw, full, caps)
+    local out = {}
+    local i, n = 1, #raw
+    while i <= n do
+        local b = raw:byte(i)
+        if b == 92 and i < n then
+            local c = raw:sub(i + 1, i + 1)
+            local d = c:match("%d") and c:byte() - 48 or nil
+            if d == 0 then
+                out[#out + 1] = full
+            elseif d then
+                out[#out + 1] = caps[d] or ""
+            elseif c == "n" then
+                out[#out + 1] = "\n"
+            elseif c == "r" then
+                out[#out + 1] = "\r"
+            elseif c == "t" then
+                out[#out + 1] = "\t"
+            else
+                out[#out + 1] = c
+            end
+            i = i + 2
+        elseif b == 92 then
+            out[#out + 1] = "\\"
+            i = i + 1
+        else
+            out[#out + 1] = raw:sub(i, i)
+            i = i + 1
+        end
+    end
+    return table.concat(out)
+end
+
+--- Recase `text` to the shape of the matched word `match` (VS Code's
+--- Preserve-case rules, ASCII-focused but UTF-8-safe via vim.fn):
+---   ALL-CAPS match  -> replacement uppercased   (FOO + bar -> BAR)
+---   Title match     -> replacement title-cased  (Foo + bar -> Bar)
+---   anything else   -> replacement as typed.
+---@param text string
+---@param match string
+---@return string
+function M.apply_preserve_case(text, match)
+    if text == "" or match == "" then
+        return text
+    end
+    local m_up = vim.fn.toupper(match)
+    local m_low = vim.fn.tolower(match)
+    if match == m_up and match ~= m_low then
+        return vim.fn.toupper(text)
+    end
+    local first = vim.fn.strpart(match, 0, 1)
+    local rest = vim.fn.strpart(match, 1, math.max(0, vim.fn.strchars(match) - 1))
+    if first == vim.fn.toupper(first) and first ~= vim.fn.tolower(first) and rest == vim.fn.tolower(rest) then
+        local t_first = vim.fn.strpart(text, 0, 1)
+        local t_rest = vim.fn.strpart(text, 1, math.max(0, vim.fn.strchars(text) - 1))
+        return vim.fn.toupper(t_first) .. vim.fn.tolower(t_rest)
+    end
+    return text
+end
+
+--- Callback for the \= expression built by M.preserve_expr: expand the raw
+--- replacement against THIS match, then recase it. MUST stay reachable via
+--- v:lua.require'vscode-search-replace.engine'.
+---@param full string
+---@param caps string[]
+---@param raw string
+---@return string
+function M.preserve_submatch(full, caps, raw)
+    return M.apply_preserve_case(M.expand_repl(raw, full, caps), full or "")
+end
+
+--- The substitute() replacement string for preserve-case mode: a
+--- sub-replace-expression whose evaluation calls back into Lua per match.
+--- The user text is embedded as a VimL single-quoted literal (quotes
+--- doubled), so it can never break out of the expression.
+---@param raw string
+---@return string
+function M.preserve_expr(raw)
+    local lit = "'" .. (raw:gsub("'", "''")) .. "'"
+    return "\\=v:lua.require'vscode-search-replace.engine'.preserve_submatch("
+        .. "submatch(0), map(range(1, 9), 'submatch(v:val)'), "
+        .. lit
+        .. ")"
+end
+
 --- Apply the search/replace to a single line using Vim regex semantics.
 --- Broken regexes fall back to the line unchanged (rg already validated the
 --- pattern for line selection; this only guards apply-time crashes).
@@ -122,7 +219,12 @@ end
 ---@param params table
 ---@return string
 function M.substitute_line(line, params)
-    local repl = M.to_vim_repl(params.replacement or "")
+    local repl
+    if params.preserve_case then
+        repl = M.preserve_expr(params.replacement or "")
+    else
+        repl = M.to_vim_repl(params.replacement or "")
+    end
     local ok, result = pcall(vim.fn.substitute, line, M.build_vim_pattern(params), repl, "g")
     if not ok or type(result) ~= "string" then
         return line
