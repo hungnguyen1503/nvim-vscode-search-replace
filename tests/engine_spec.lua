@@ -73,7 +73,7 @@ describe("engine pattern/replacement translation", function()
   it("whole-word wraps bounds without shifting user capture groups", function()
     assert.are.equal([[\v%(<%(a|b)>)\C]], engine.build_vim_pattern(params({ regex = true, whole_word = true, pattern = "a|b" })))
     assert.are.equal(
-      [[\V\%(\<foo.bar\>\)\c]],
+      [[\V\<foo.bar\>\c]],
       engine.build_vim_pattern(params({ regex = false, case_sensitive = false, whole_word = true, pattern = "foo.bar" }))
     )
     -- word boundaries require the match start/end be keyword chars, so wrap a

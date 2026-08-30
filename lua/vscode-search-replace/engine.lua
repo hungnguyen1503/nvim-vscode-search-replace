@@ -86,7 +86,9 @@ function M.build_vim_pattern(params)
             -- rg --word-regexp's \b(?:P)\b semantics.
             pat = [[\v%(<%(]] .. params.pattern .. [[)>)]]
         else
-            pat = [[\V\%(\<]] .. vim.fn.escape(params.pattern, [[\\]]) .. [[\>\)]]
+            -- \V (nomagic): \< \> ARE word boundaries here, and a literal can't
+            -- alternate, so no %(...) wrapper is needed around the pattern.
+            pat = [[\V\<]] .. vim.fn.escape(params.pattern, [[\\]]) .. [[\>]]
         end
     elseif params.regex then
         pat = [[\v]] .. params.pattern
