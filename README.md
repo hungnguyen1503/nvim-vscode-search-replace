@@ -1,0 +1,1 @@
+# nvim-vscode-search-replace
