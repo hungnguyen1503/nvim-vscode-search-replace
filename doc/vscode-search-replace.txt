@@ -1,0 +1,149 @@
+*vscode-search-replace.txt*                       VSCode Search & Replace
+
+                                                    For Neovim   Last change: 2026 August 30
+
+==============================================================================
+Table of Contents                                  *vscode-search-replace-tox*
+
+1. Introduction                                  |vscode-search-replace-intro|
+2. Requirements                              |vscode-search-replace-requirements|
+3. Installation                              |vscode-search-replace-installation|
+4. Configuration                            |vscode-search-replace-configuration|
+5. Usage                                              |vscode-search-replace-usage|
+6. API                                                  |vscode-search-replace-api|
+7. Highlights                                      |vscode-search-replace-highlights|
+8. Troubleshooting                          |vscode-search-replace-troubleshooting|
+
+==============================================================================
+1. Introduction                                  *vscode-search-replace-intro*
+
+`nvim-vscode-search-replace` brings the VS Code search & replace panel to
+Neovim: a floating two-column UI with live debounced ripgrep results, inline
+red/green diff previews for every match, and a byte-exact Replace All. Built
+on <https://github.com/grapp-dev/nui-components.nvim>.
+
+  - live results while you type (ripgrep, debounced)
+  - inline old/new diff preview per match, with `\1`–`\9` capture references
+  - `Aa` case and `.*` regex toggles, Files-to-Include path/glob filter
+  - whole-project, current-file and word/visual-selection search variants
+  - `<CR>` jumps to the match, `<C-R>` replaces everywhere
+  - `Alt+h/j/k/l` panel navigation; the plugin ships no global keymaps
+
+==============================================================================
+2. Requirements                              *vscode-search-replace-requirements*
+
+  - Neovim >= 0.10 (`vim.uv`, `vim.system`, `vim.base64`)
+  - ripgrep (`rg`) on your `PATH`
+  - a Nerd Font for the tree icons (optional; UI degrades gracefully)
+
+==============================================================================
+3. Installation                              *vscode-search-replace-installation*
+
+With lazy.nvim: >lua
+
+    {
+      "hungnguyen1503/nvim-vscode-search-replace",
+      dependencies = { "grapp-dev/nui-components.nvim", "MunifTanjim/nui.nvim" },
+      cmd = "SearchReplace",
+      keys = {
+        { "<leader>S", function() require("vscode-search-replace").open() end, desc = "Search & Replace" },
+      },
+      opts = {},
+    }
+<
+The plugin defines no keymaps by itself; the `keys` block above is the
+recommended wiring.
+
+==============================================================================
+4. Configuration                            *vscode-search-replace-configuration*
+
+                                                    *vscode-search-replace-setup()*
+>lua
+    require("vscode-search-replace").setup({
+      position = "center",
+      width = 0.9,
+      height = 0.85,
+      debounce = 300,
+    })
+<
+
+position *vscode-search-replace-position*
+    Float anchor: `"center"` | `"top"` | `"bottom"` | `"left"` | `"right"`.
+    Anything else warns via |notify| and falls back to `"center"`.
+
+width     *vscode-search-replace-width*
+    `<= 1`: fraction of the editor columns. `> 1`: absolute column count
+    (clamped to the editor width). Default `0.9`.
+
+height   *vscode-search-replace-height*
+    Same rule for editor lines. Default `0.85`.
+
+debounce *vscode-search-replace-debounce*
+    Milliseconds after the last keystroke before re-searching. Default `300`.
+
+==============================================================================
+5. Usage                                              *vscode-search-replace-usage*
+
+:SearchReplace                                                *:SearchReplace*
+    Open the search & replace float (whole project = cwd).
+
+Keys inside the float: ~
+    Key             Action
+    <Esc>/<Esc>     close (first <Esc> leaves insert mode in a focused input)
+    q               close (normal mode)
+    <CR>            jump to the selected match
+    <C-R>           Replace All (asks `(Y)es [C]ancel` first)
+    Alt+h/Alt+l     move to the previous/next panel column
+    Alt+j/Alt+k     move to the next/previous panel in a column
+
+Search fields: ~
+    Search              ripgrep pattern (literal unless `.*` is on)
+    Aa / .*             case sensitivity / regex toggles
+    Replace             replacement text; `\0`–`\9` are capture references in
+                        regex mode. Empty → no diff preview, Replace All is a
+                        no-op.
+    Files to Include    comma-separated globs (`*.lua`) or paths (`src`,
+                        searched recursively as `src/**`). Empty = all files.
+
+==============================================================================
+6. API                                                  *vscode-search-replace-api*
+
+                                                        *vscode-search-replace-open()*
+require("vscode-search-replace").open({opts})
+    Opens (or toggles closed) the float. `opts` fields:
+      file      = true   → search the current file only
+      word      = true   → prefill the pattern from the visual selection
+                          (normal mode: word under cursor) and search
+      pattern   = "..."  → prefill with a literal pattern, searched
+      other fields are merged as initial search params
+    Calling with the float open closes it.
+
+==============================================================================
+7. Highlights                                      *vscode-search-replace-highlights*
+
+Highlight groups (all linked by default, see `plugin/vscode-search-replace.lua`):
+
+    NuiComponentsTitle      float titles
+    NuiComponentsBorder     panel borders
+    NuiComponentsDiffAdd    replacement (new) text
+    NuiComponentsDiffDelete original (old) text
+    NuiComponentsFocus      focused panel indicator
+
+==============================================================================
+8. Troubleshooting                          *vscode-search-replace-troubleshooting*
+
+:checkhealth vscode-search-replace                  *:checkhealth*
+    Reports Neovim version and ripgrep availability.
+
+Common issues: ~
+    - "searches will fail" in checkhealth → install `rg`.
+    - Tree icons look wrong → install a Nerd Font.
+    - `<Esc>` seems to need two presses → expected: the first leaves insert
+      mode in the focused input, the second closes the float.
+
+==============================================================================
+References                                                *vscode-search-replace-refs*
+
+    NuiComponents Showcase — https://nui-components.grapp.dev/docs/showcase
+
+ vim:tw=78:ts=8:ft=help:norl:
