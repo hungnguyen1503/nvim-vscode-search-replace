@@ -11,6 +11,7 @@ local Text = require("nui.text")
 
 function M.create(opts)
     local cfg = config.get()
+    local icons = cfg.icons
     -- Sizes resolve to numbers at open time: the renderer needs numeric
     -- sizes (flex layout children read parent:get_size() raw; nui.layout
     -- percentage strings never resolve for them — size.lua:172).
@@ -323,7 +324,7 @@ function M.create(opts)
     local function prepare_node(node, line)
         line:append(("  "):rep(node:get_depth() - 1))
         if node.kind == "file" then
-            line:append(Text((node:is_expanded() and " " or " ") .. node.rel .. "  (" .. node.count .. ")", "Directory"))
+            line:append(Text((node:is_expanded() and (icons.tree_expanded .. " ") or (icons.tree_collapsed .. " ")) .. node.rel .. "  (" .. node.count .. ")", "Directory"))
         elseif node.kind == "line" then
             line:append(Text(("%4d │ "):format(node.lnum), "LineNr"))
             local text, s, e, head, tail = clip(node.text, node.start, node["end"], avail_width(node))
@@ -459,6 +460,34 @@ function M.create(opts)
         end
     end
 
+    -- zc: VS Code "collapse all files", toggling to expand-all when every
+    -- file section is already collapsed. Line/preview children keep their
+    -- expanded state, so re-expanding a file reveals previews as rendered.
+    local function toggle_collapse_all()
+        if #tree_data == 0 then
+            return
+        end
+        local any_open = false
+        for _, file_node in ipairs(tree_data) do
+            any_open = any_open or file_node:is_expanded()
+        end
+        for _, file_node in ipairs(tree_data) do
+            if any_open then
+                file_node:collapse()
+            else
+                file_node:expand()
+            end
+        end
+        -- get_tree():render() is the SAME incremental path on_select uses for
+        -- a single file: set_nodes() cannot be called twice over the same
+        -- node objects (initialize_nodes appends to _child_ids and drops
+        -- __children), so redraw() here would corrupt nui's id map.
+        local tree = tree_comp:get_tree()
+        if tree then
+            tree:render()
+        end
+    end
+
     run_search = function()
         if closed then
             return
@@ -536,17 +565,17 @@ function M.create(opts)
             end,
         })
     end
-    local tb_case = toggle_button("case", "case_sensitive", "Aa", "<A-c>", schedule)
-    local tb_regex = toggle_button("regex", "regex", ".*", "<A-r>", schedule)
+    local tb_case = toggle_button("case", "case_sensitive", icons.case, "<A-c>", schedule)
+    local tb_regex = toggle_button("regex", "regex", icons.regex, "<A-r>", schedule)
     -- ab is ALWAYS mounted (VS Code keeps its whole-word button permanent):
     -- showing/hiding it would re-flow the flex row and resize the search box
     -- on every mode switch, which is exactly what a find widget must not do.
-    local tb_whole = toggle_button("whole", "whole_word", "ab", "<A-w>", schedule)
+    local tb_whole = toggle_button("whole", "whole_word", icons.whole_word, "<A-w>", schedule)
     -- The replace-mode toggle is an ICON box (VS Code shows a chevron there,
     -- not the word): ⇄ sits LEFT of Search and reveals/hides the replace ROW
     -- (Replace input · AB · ⇉). Leaving replace mode also drops
     -- preserve-case so a hidden box can never silently reshape replacements.
-    local tb_mode = toggle_button("replace", nil, "⇄", nil, function(value)
+    local tb_mode = toggle_button("replace", nil, icons.replace_mode, nil, function(value)
         if not value and toggles:get_value().preserve then
             toggles.preserve = false
             params.preserve_case = false
@@ -561,7 +590,7 @@ function M.create(opts)
     -- discoverability for the keymap overlay: the panel-local `?` mapping
     -- works, but a visible box tells the user the help exists. Same float.
     local tb_help = n.button({
-        label = "?",
+        label = icons.help,
         border_style = "rounded",
         on_press = function(self)
             toggle_help(self.winid)
@@ -575,7 +604,7 @@ function M.create(opts)
     -- VS Code's preserve-case ("AB") box lives in the REPLACE ROW (hidden
     -- with it); its Alt+P hotkey is guarded because global_press_key also
     -- fires while the row is hidden.
-    local tb_preserve = toggle_button("preserve", "preserve_case", "AB", "<A-p>", schedule, function()
+    local tb_preserve = toggle_button("preserve", "preserve_case", icons.preserve_case, "<A-p>", schedule, function()
         return toggles:get_value().replace
     end)
     local ti_replace = n.text_input({
@@ -646,7 +675,7 @@ function M.create(opts)
     -- Replace All becomes the VS Code-style double-arrow ICON box ⇉; it
     -- lives in the replace row and asks a Yes/No dialog before applying.
     local btn_replace = n.button({
-        label = "⇉",
+        label = icons.replace_all,
         border_style = "rounded",
         global_press_key = "<C-R>",
         on_press = replace_all,
@@ -727,19 +756,37 @@ function M.create(opts)
     -- unlike renderer:add_mappings which accepts mode tables.
     local ns_help = vim.api.nvim_create_namespace("vscode-search-replace-help")
     local HELP_HEADER = "vscode-search-replace — keymaps"
-    local HELP_KEYS = {
-        { "<Tab> / <S-Tab>", "next / previous panel" },
-        { "Alt+h / Alt+l", "sidebar <-> results tree" },
-        { "Alt+j / Alt+k", "previous / next panel" },
-        { "Enter / Space / click", "activate widget · jump to match" },
-        { "Alt+C", "toggle Aa  match case" },
-        { "Alt+W", "toggle ab  whole word" },
-        { "Alt+R", "toggle .*  regular expression" },
-        { "Alt+P", "toggle AB  preserve case (replace row)" },
-        { "Ctrl+R", "Replace All — asks for confirmation" },
-        { "⇄ box", "show/hide the replace row (Replace · AB · ⇉)" },
-        { "⇉ box", "Replace All (Yes/No dialog)" },
-        { "? / q / <Esc>", "show/hide this help (? box too)" },
+    -- Sections, not a flat list: the overlay is the discoverability surface,
+    -- so group rows by intent and color keys apart from descriptions.
+    -- Descriptions interpolate cfg.icons so the help always names the glyphs
+    -- the panel actually shows.
+    local HELP_SECTIONS = {
+        { "Navigation", {
+            { "<Tab> / <S-Tab>", "next / previous panel" },
+            { "Alt+h / Alt+l", "sidebar <-> results tree" },
+            { "Alt+j / Alt+k", "previous / next panel" },
+            { "Enter / Space / click", "activate the focused widget" },
+        } },
+        { "Search", {
+            { "Alt+C", ("toggle %s  match case"):format(icons.case) },
+            { "Alt+W", ("toggle %s  whole word"):format(icons.whole_word) },
+            { "Alt+R", ("toggle %s  regular expression"):format(icons.regex) },
+            { ("%s box"):format(icons.replace_mode), "show/hide the replace row" },
+        } },
+        { "Replace", {
+            { "Alt+P", ("toggle %s  preserve case"):format(icons.preserve_case) },
+            { ("Ctrl+R / %s box"):format(icons.replace_all), "Replace All" },
+            { "y / n  ·  Enter / Esc", "answer the Replace All dialog" },
+        } },
+        { "Results", {
+            { "j / k", "move between rows" },
+            { "Enter / click", "jump to the selected match" },
+            { "zc", "collapse all files — press again to expand" },
+        } },
+        { "General", {
+            { ("? / the %s box"):format(icons.help), "show/hide this help" },
+            { "q / Esc / Ctrl+F", "close the panel" },
+        } },
     }
     local help_buf, help_win = nil, nil
     local function close_help()
@@ -758,14 +805,24 @@ function M.create(opts)
         end
         help_buf = vim.api.nvim_create_buf(false, true)
         vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = help_buf })
-        local lines = { HELP_HEADER, "" }
-        for _, entry in ipairs(HELP_KEYS) do
-            -- Pad by DISPLAY width: "⇄" is 3 bytes but 1 cell, so %-24s would
-            -- misalign its row.
-            local key, desc = entry[1], entry[2]
-            table.insert(lines, key .. (" "):rep(math.max(1, 24 - vim.fn.strwidth(key))) .. desc)
+        local lines = { HELP_HEADER }
+        -- row is the 0-based index the line WILL have once appended
+        local marks = { { row = 0, col = #HELP_HEADER, hl = "Label" } }
+        for _, section in ipairs(HELP_SECTIONS) do
+            table.insert(lines, "")
+            table.insert(marks, { row = #lines, col = #section[1], hl = "Function" })
+            table.insert(lines, section[1])
+            for _, kv in ipairs(section[2]) do
+                local key, desc = kv[1], kv[2]
+                table.insert(marks, { row = #lines, col = #key, hl = "Special" })
+                -- Pad by DISPLAY width: "⇄" is 3 bytes but 1 cell, so %-24s
+                -- would misalign the row.
+                table.insert(lines, key .. (" "):rep(math.max(1, 24 - vim.fn.strwidth(key))) .. desc)
+            end
         end
-        local w, h = 70, #lines + 2
+        -- clamp so a short editor can never fail nvim_open_win
+        local w = math.min(70, vim.o.columns - 4)
+        local h = math.min(#lines + 2, vim.o.lines - 2)
         help_win = vim.api.nvim_open_win(help_buf, true, {
             relative = "editor",
             row = math.floor((vim.o.lines - h) / 2),
@@ -777,7 +834,9 @@ function M.create(opts)
             zindex = 300,
         })
         vim.api.nvim_buf_set_lines(help_buf, 0, -1, false, lines)
-        vim.api.nvim_buf_set_extmark(help_buf, ns_help, 0, 0, { end_col = #HELP_HEADER, hl_group = "Label" })
+        for _, m in ipairs(marks) do
+            vim.api.nvim_buf_set_extmark(help_buf, ns_help, m.row, 0, { end_col = m.col, hl_group = m.hl })
+        end
         for _, k in ipairs({ "?", "q", "<Esc>", "i" }) do
             vim.keymap.set("n", k, function()
                 toggle_help(back_win)
@@ -804,6 +863,7 @@ function M.create(opts)
             c:map("n", "?", function()
                 toggle_help(c.winid)
             end, { noremap = true })
+            c:map("n", "zc", toggle_collapse_all, { noremap = true })
             for _, m in ipairs({ "n", "i" }) do
                 c:map(m, "<A-j>", function()
                     focus_component(sibling(c, 1))

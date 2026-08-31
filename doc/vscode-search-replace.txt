@@ -37,6 +37,10 @@ on <https://github.com/grapp-dev/nui-components.nvim>.
   - `Alt+h/j/k/l` + `Tab` panel navigation and `Alt+c/w/r/p` hotkeyed
     toggles; the plugin ships no global keymaps
   - `?` in normal mode shows the keymap help overlay
+  - `zc` in the results tree collapses all files at once (press again to
+    expand them all)
+  - every glyph (tree chevrons and the `⇄` `⇉` `?` `Aa` `ab` `.*` `AB`
+    boxes) is overridable via the `icons` table in |vscode-search-replace-setup()|
 
 ==============================================================================
 2. Requirements                              *vscode-search-replace-requirements*
@@ -75,6 +79,12 @@ recommended wiring.
       width = 0.9,
       height = 0.85,
       debounce = 300,
+      icons = {
+        tree_expanded = "\u{F107}", tree_collapsed = "\u{F105}",
+        replace_mode = "⇄", replace_all = "⇉", help = "?",
+        case = "Aa", whole_word = "ab", regex = ".*",
+        preserve_case = "AB",
+      },
     })
 <
 
@@ -91,6 +101,14 @@ height   *vscode-search-replace-height*
 
 debounce *vscode-search-replace-debounce*
     Milliseconds after the last keystroke before re-searching. Default `300`.
+
+icons     *vscode-search-replace-icons*
+    Table of glyphs used by the UI; omitted keys keep the defaults above.
+    Valid keys: `tree_expanded`, `tree_collapsed`, `replace_mode`,
+    `replace_all`, `help`, `case`, `whole_word`, `regex`, `preserve_case`.
+    Values must be strings (an empty string hides a glyph); a non-string
+    value warns via |notify| and keeps that key's default. The `?` help
+    overlay describes boxes with your configured glyphs.
 
 ==============================================================================
 5. Usage                                              *vscode-search-replace-usage*
@@ -113,6 +131,8 @@ Keys inside the float: ~
     Alt+h/Alt+l     move to the previous/next panel column
     Alt+j/Alt+k     move to the next/previous panel in a column
     ?               show/hide the keymap help overlay (or press the ? box)
+    zc              collapse all files in the results tree; press again to
+                    expand them all (normal mode, any panel)
 
     The toggle boxes fill (reverse video) while their option is active.
     Focus order: `⇄` -> Search -> `ab` -> `Aa` -> `.*` -> `?` -> Replace
@@ -185,7 +205,9 @@ Highlight groups (all linked by default, see `plugin/vscode-search-replace.lua`)
 
 Common issues: ~
     - "searches will fail" in checkhealth → install `rg`.
-    - Tree icons look wrong → install a Nerd Font.
+    - Tree icons look wrong → install a Nerd Font, or set simpler glyphs via
+      |vscode-search-replace-icons| (e.g. `icons = { tree_expanded = "+",
+      tree_collapsed = "-" }`).
     - `<Esc>` seems to need two presses → expected: the first leaves insert
       mode in the focused input, the second closes the float.
     - `ab` matches nothing → whole-word requires the match to start and end

@@ -5,11 +5,34 @@ local M = {}
 ---@field width? number    -- <=1: fraction of editor columns; >1: absolute columns
 ---@field height? number   -- <=1: fraction of editor lines; >1: absolute lines
 ---@field debounce? number -- ms after the last keystroke before re-searching
+---@field icons? VscrIcons -- glyph overrides for the tree chevrons and box labels
+
+---@class VscrIcons
+---@field tree_expanded? string  -- chevron before an expanded file row (default \u{F107})
+---@field tree_collapsed? string -- chevron before a collapsed file row (default \u{F105})
+---@field replace_mode? string   -- \u{21C4} box left of Search
+---@field replace_all? string    -- \u{21C9} Replace All box
+---@field help? string           -- ? box
+---@field case? string           -- Aa box
+---@field whole_word? string     -- ab box
+---@field regex? string          -- .* box
+---@field preserve_case? string  -- AB box
 local defaults = {
     position = "center",
     width = 0.9,
     height = 0.85,
     debounce = 300,
+    icons = {
+        tree_expanded = "\u{F107}",
+        tree_collapsed = "\u{F105}",
+        replace_mode = "\u{21C4}", -- ⇄
+        replace_all = "\u{21C9}", -- ⇉
+        help = "?",
+        case = "Aa",
+        whole_word = "ab",
+        regex = ".*",
+        preserve_case = "AB",
+    },
 }
 
 local options = vim.deepcopy(defaults)
@@ -35,6 +58,20 @@ function M.setup(opts)
             vim.log.levels.WARN
         )
         options.position = "center"
+    end
+    if type(options.icons) ~= "table" then
+        vim.notify('vscode-search-replace: "icons" must be a table, using defaults', vim.log.levels.WARN)
+        options.icons = vim.deepcopy(defaults.icons)
+    else
+        for key, def in pairs(defaults.icons) do
+            if options.icons[key] ~= nil and type(options.icons[key]) ~= "string" then
+                vim.notify(
+                    ('vscode-search-replace: icon "%s" must be a string, using default'):format(key),
+                    vim.log.levels.WARN
+                )
+                options.icons[key] = def
+            end
+        end
     end
 end
 

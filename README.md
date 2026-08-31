@@ -42,6 +42,8 @@ UI with live results, inline diff previews, and ripgrep speed. Built on
 - ⚡ `<CR>` jumps straight to the match · `<C-R>` replaces everywhere (with a
   Yes/No confirmation)
 - ⌨️ panel navigation with `Alt+h/j/k/l` — no plugin keymaps stolen from you
+- 🔧 every glyph — the `⇄` / `ab` / `Aa` / `.*` / `AB` / `⇉` / `?` boxes and the
+  tree chevrons — is overridable via the `icons` table in `setup()`
 
 ## ⚡️ Requirements
 
@@ -102,6 +104,18 @@ require("vscode-search-replace").setup({
   height = 0.85,
   -- ms after the last keystroke before the re-search fires
   debounce = 300,
+  -- every glyph is overridable; omitted keys keep the defaults below
+  icons = {
+    tree_expanded = "\u{F107}", -- chevron before an expanded file row
+    tree_collapsed = "\u{F105}", -- chevron before a collapsed file row
+    replace_mode = "⇄", -- search row box: show/hide the replace row
+    replace_all = "⇉", -- Replace All box
+    help = "?", -- help box
+    case = "Aa",
+    whole_word = "ab",
+    regex = ".*",
+    preserve_case = "AB",
+  },
 })
 ```
 
@@ -154,6 +168,7 @@ wherever focus is. Press `?` inside the float to see this list.
 | `y` / `n` · `Enter` / `Esc` | n | answer the Replace All dialog (or click `Yes`/`No`) |
 | `?`                   | n     | show/hide the keymap help                        |
 | `q` / `Esc` / `<C-f>` | n/i   | close                                            |
+| `zc`                  | n     | collapse all files in the tree (press again to expand) |
 
 ## 🙏 References
 
