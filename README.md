@@ -18,7 +18,7 @@ UI with live results, inline diff previews, and ripgrep speed. Built on
   </tr>
   <tr>
     <td align="center">
-      <img src="img/preview.png" alt="The Search and Replace float in replace mode: the ⇄ toggle box left of the fixed-width pattern field, ab, Aa and .* boxes to its right, then the ? help box — active toggles filled — plus the Replace field with the ⇉ Replace All icon box, the Files-to-Include filter and a ripgrep results tree showing every match and its old/new line" width="88%">
+      <img src="img/preview.png" alt="The Search and Replace float in replace mode: the fixed-width pattern field with the ⇄ toggle box right after it, then ab, Aa, .* and the ? help boxes — active toggles filled — plus the Replace field with the ⇉ Replace All icon box, the Files-to-Include filter and a ripgrep results tree showing every match and its old/new line" width="88%">
     </td>
   </tr>
 </table>
@@ -51,7 +51,7 @@ UI with live results, inline diff previews, and ripgrep speed. Built on
   opts = {}, -- or call setup() by hand, see below
   keys = {
     {
-      "<leader>S",
+      "<leader>fs",
       mode = "n",
       function()
         require("vscode-search-replace").open()
@@ -66,14 +66,9 @@ UI with live results, inline diff previews, and ripgrep speed. Built on
       end,
       desc = "Search word under cursor / selection",
     },
-    {
-      "<C-F>",
-      mode = "n",
-      function()
-        require("vscode-search-replace").open({ file = true, word = true })
-      end,
-      desc = "Search word under cursor in current file",
-    },
+    -- Variants (bind any key yourself — the plugin ships no global keymaps):
+    -- current-file search for the word under cursor:
+    --   { "<leader>ff", function() require("vscode-search-replace").open({ file = true, word = true }) end, desc = "Search word in current file" },
   },
 }
 ```
@@ -122,8 +117,9 @@ require("vscode-search-replace").open()
 require("vscode-search-replace").open({ file = true, word = true })
 ```
 
-The float opens in search-only mode; press the `⇄` box (left of Search) to show
-the replace row: the replace field and the `⇉` (Replace All) icon box.
+The float opens in search-only mode; press the `⇄` box (right of Search — or
+just `Tab` from the search field) to show the replace row: the replace field
+and the `⇉` (Replace All) icon box.
 
 Troubleshooting: `:checkhealth vscode-search-replace`
 
@@ -142,10 +138,11 @@ wherever focus is. Press `?` inside the float to see this list.
 | `Alt+c`               | n/i   | toggle `Aa` — match case                         |
 | `Alt+w`               | n/i   | toggle `ab` — match whole word                   |
 | `Alt+r`               | n/i   | toggle `.*` — regular expression                 |
-| `Ctrl+r`              | n/i   | Replace All — asks Yes/No first                  |
+| `Alt+p`               | n/i   | toggle `AB` — preserve case (replace mode)       |
+| `Ctrl+Alt+Enter`      | n/i   | Replace All — asks Yes/No first                  |
 | `y` / `n` · `Enter` / `Esc` | n | answer the Replace All dialog (or click `Yes`/`No`) |
 | `?`                   | n     | show/hide the keymap help                        |
-| `q` / `Esc` / `<C-f>` | n/i   | close                                            |
+| `q` / `Esc` / `<leader>fs` | n/i | close                                         |
 | `zc`                  | n     | collapse all files in the tree (press again to expand) |
 
 ## 🙏 References

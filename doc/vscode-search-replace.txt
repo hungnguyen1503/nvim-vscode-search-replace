@@ -1,6 +1,6 @@
 *vscode-search-replace.txt*                       VSCode Search & Replace
 
-                                                    For Neovim   Last change: 2026 August 31
+                                                    For Neovim   Last change: 2026 September 01
 
 ==============================================================================
 Table of Contents                                  *vscode-search-replace-tox*
@@ -26,14 +26,15 @@ on <https://github.com/grapp-dev/nui-components.nvim>.
   - inline old/new diff preview per match, with `\1`–`\9` capture references
   - inline `ab` whole-word, `Aa` case and `.*` regex toggles on the search
     row, plus a Files-to-Include path/glob filter
-  - the float opens search-only; pressing the `⇄` box (left of the pattern
-    field) reveals the replace row — replace field, `AB` preserve-case box
-    and the `⇉` Replace All icon box — the search box keeps a fixed width
+  - the float opens search-only; pressing the `⇄` box (right of the
+    pattern field — the first Tab stop after the search input) reveals the
+    replace row — replace field, `AB` preserve-case box and the `⇉` Replace
+    All icon box — the search box keeps a fixed width
   - every box, field and button is mouse-clickable: click a field to type,
     click a box to toggle it, click `Yes`/`No` in the confirmation dialog
   - whole-project, current-file and word/visual-selection search variants
-  - `<CR>` jumps to the match, `<C-R>` replaces everywhere after a Yes/No
-    confirmation dialog
+  - `<CR>` jumps to the match, `<M-C-CR>` (Ctrl+Alt+Enter) replaces
+    everywhere after a Yes/No confirmation dialog
   - `Alt+h/j/k/l` + `Tab` panel navigation and `Alt+c/w/r/p` hotkeyed
     toggles; the plugin ships no global keymaps
   - `?` in normal mode shows the keymap help overlay
@@ -59,9 +60,10 @@ With lazy.nvim: >lua
       dependencies = { "grapp-dev/nui-components.nvim", "MunifTanjim/nui.nvim" },
       cmd = "SearchReplace",
       keys = {
-        { "<leader>S", function() require("vscode-search-replace").open() end, desc = "Search & Replace" },
+        { "<leader>fs", function() require("vscode-search-replace").open() end, desc = "Search & Replace" },
         { "<leader>sw", mode = { "n", "v" }, function() require("vscode-search-replace").open({ word = true }) end, desc = "Search word under cursor / selection" },
-        { "<C-F>", function() require("vscode-search-replace").open({ file = true, word = true }) end, desc = "Search word under cursor in current file" },
+        -- variants (bind any key yourself): open({ file = true, word = true })
+        -- searches the word under cursor in the current file.
       },
       opts = {},
     }
@@ -120,10 +122,11 @@ Keys inside the float: ~
     Key             Action
     <Tab>/<S-Tab>   next / previous panel (focus order below)
     <Esc>/<Esc>     close (first <Esc> leaves insert mode in a focused input)
-    q               close (normal mode)
+    q / <leader>fs  close (normal mode; the opener key toggles it closed)
     <CR>            activate the focused widget · jump to the selected match
     click           same as <CR>/Space on boxes and fields; focuses inputs
-    <C-R>           Replace All — opens a Yes/No confirmation dialog
+    <M-C-CR>        Replace All (Ctrl+Alt+Enter) — opens a Yes/No
+                    confirmation dialog
     Alt+c           toggle `Aa` match case
     Alt+w           toggle `ab` whole word
     Alt+r           toggle `.*` regular expression
@@ -135,7 +138,7 @@ Keys inside the float: ~
                     expand them all (normal mode, any panel)
 
     The toggle boxes fill (reverse video) while their option is active.
-    Focus order: `⇄` -> Search -> `ab` -> `Aa` -> `.*` -> `?` -> Replace
+    Focus order: Search -> `⇄` -> `ab` -> `Aa` -> `.*` -> `?` -> Replace
     input -> `AB` -> `⇉` -> Files to Include -> results tree. The Replace
     row is hidden (not focusable, and `AB` cannot take effect) while the
     `⇄` box is inactive; pressing it (`Enter`/`Space`/click) shows it,
@@ -143,7 +146,7 @@ Keys inside the float: ~
     resizes between modes.
 
 Replace All confirmation: ~
-    `⇉` or `<C-R>` first floats a modal dialog asking "Replace N matches in
+    `⇉` or `<M-C-CR>` first floats a modal dialog asking "Replace N matches in
     M files?". Answer with `y`/`Y` or `<CR>` (yes), `n`/`N`/`q`/`<Esc>` (no),
     or by clicking the `Yes` / `No` boxes. Nothing is written before you
     confirm; the dialog never touches files by itself.
@@ -159,7 +162,7 @@ Preserve case (`AB`): ~
 
 Search fields: ~
     Search              ripgrep pattern (literal unless `.*` is on)
-    ⇄ / ?              replace-mode / keymap-help boxes flanking the row
+    ⇄ / ?              replace-mode box right of Search / help box at the row end
     ab                  whole-word toggle box (right of Search): matches are
                         wrapped in keyword boundaries — the same semantics as
                         `rg --word-regexp`; `\1`–`\9` stay unshifted

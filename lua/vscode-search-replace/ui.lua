@@ -572,9 +572,11 @@ function M.create(opts)
     -- on every mode switch, which is exactly what a find widget must not do.
     local tb_whole = toggle_button("whole", "whole_word", icons.whole_word, "<A-w>", schedule)
     -- The replace-mode toggle is an ICON box (VS Code shows a chevron there,
-    -- not the word): ⇄ sits LEFT of Search and reveals/hides the replace ROW
-    -- (Replace input · AB · ⇉). Leaving replace mode also drops
-    -- preserve-case so a hidden box can never silently reshape replacements.
+    -- not the word): ⇄ sits RIGHT of Search — the first Tab stop after the
+    -- input (VS Code's find-widget flow: search → Tab → toggle) — and
+    -- reveals/hides the replace ROW (Replace input · AB · ⇉). Leaving replace
+    -- mode also drops preserve-case so a hidden box can never silently reshape
+    -- replacements.
     local tb_mode = toggle_button("replace", nil, icons.replace_mode, nil, function(value)
         if not value and toggles:get_value().preserve then
             toggles.preserve = false
@@ -677,14 +679,16 @@ function M.create(opts)
     local btn_replace = n.button({
         label = icons.replace_all,
         border_style = "rounded",
-        global_press_key = "<C-R>",
+        -- <C-A-CR> normalizes to <M-C-CR> (Neovim multi-modifier keycodes;
+        -- delivered by kitty-keyboard/CSI-u terminals such as WezTerm).
+        global_press_key = "<C-A-CR>",
         on_press = replace_all,
         on_mount = function(self)
             arm_mouse(self, replace_all)
         end,
     })
 
-    -- 50/50 split: the search row (⇄ + input + ab + Aa + .* + ?) needs the
+    -- 50/50 split: the search row (input + ⇄ + ab + Aa + .* + ?) needs the
     -- sidebar wide enough that flex=1 still leaves a usable input at ~80-col
     -- terminals; the tree truncates gracefully. The replace row hides as a
     -- WHOLE ROW (is_hidden walks the parent chain, so its children leave the
@@ -693,10 +697,10 @@ function M.create(opts)
         { flex = 50 },
         n.columns(
             { flex = 0, size = 1 },
-            tb_mode,
-            n.gap(1),
             ti_search,
             -- one blank column keeps every box border clear of its neighbours
+            n.gap(1),
+            tb_mode,
             n.gap(1),
             tb_whole,
             n.gap(1),
@@ -775,7 +779,7 @@ function M.create(opts)
         } },
         { "Replace", {
             { "Alt+P", ("toggle %s  preserve case"):format(icons.preserve_case) },
-            { ("Ctrl+R / %s box"):format(icons.replace_all), "Replace All" },
+            { ("Ctrl+Alt+Enter / %s box"):format(icons.replace_all), "Replace All" },
             { "y / n  ·  Enter / Esc", "answer the Replace All dialog" },
         } },
         { "Results", {
@@ -785,7 +789,7 @@ function M.create(opts)
         } },
         { "General", {
             { ("? / the %s box"):format(icons.help), "show/hide this help" },
-            { "q / Esc / Ctrl+F", "close the panel" },
+            { "q / Esc / <leader>fs", "close the panel" },
         } },
     }
     local help_buf, help_win = nil, nil
@@ -892,12 +896,10 @@ function M.create(opts)
         run_search()
     end
     -- n+i so the toggle closes from inside the (insert-mode) text inputs;
-    -- buffer-local maps win over the global <leader>S opener while mounted.
+    -- buffer-local maps win over the global <leader>fs opener while mounted.
     renderer:add_mappings({
         { mode = "n", key = "q", handler = close },
         { mode = { "n", "i" }, key = "<leader>S", handler = close },
-        { mode = { "n", "i" }, key = "<C-F>", handler = close },
-        { mode = { "n", "i" }, key = "<C-S-F>", handler = close },
         { mode = { "n", "i" }, key = "<leader>fs", handler = close },
     })
 
