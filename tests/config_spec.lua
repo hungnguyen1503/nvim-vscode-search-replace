@@ -53,7 +53,6 @@ describe("config", function()
 
   it("has documented icon defaults", function()
     local icons = config.get().icons
-    assert.same("?", icons.help)
     assert.same("Aa", icons.case)
     assert.same("ab", icons.whole_word)
     assert.same(".*", icons.regex)
@@ -65,18 +64,18 @@ describe("config", function()
   end)
 
   it("merges partial icon overrides", function()
-    config.setup({ icons = { help = "H" } })
-    assert.same("H", config.get().icons.help)
+    config.setup({ icons = { case = "CC" } })
+    assert.same("CC", config.get().icons.case)
     -- untouched icons keep defaults (deep merge)
-    assert.same("Aa", config.get().icons.case)
+    assert.same("ab", config.get().icons.whole_word)
     assert.same("\u{21C4}", config.get().icons.replace_mode)
   end)
 
   it("resets custom icons on the next setup()", function()
-    config.setup({ icons = { help = "H" } })
-    assert.same("H", config.get().icons.help)
+    config.setup({ icons = { case = "CC" } })
+    assert.same("CC", config.get().icons.case)
     config.setup({})
-    assert.same("?", config.get().icons.help)
+    assert.same("Aa", config.get().icons.case)
   end)
 
   it("accepts an empty-string icon override without warning", function()
@@ -105,7 +104,7 @@ describe("config", function()
     assert.are.equal(1, #msgs)
     assert.are.equal(vim.log.levels.WARN, msgs[1].level)
     assert.matches('"icons"', msgs[1].msg)
-    assert.same("?", config.get().icons.help)
+    assert.same("Aa", config.get().icons.case)
 
     msgs = {}
     -- a non-string value warns; a valid sibling in the same call survives

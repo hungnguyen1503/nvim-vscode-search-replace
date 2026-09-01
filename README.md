@@ -18,7 +18,7 @@ UI with live results, inline diff previews, and ripgrep speed. Built on
   </tr>
   <tr>
     <td align="center">
-      <img src="img/preview.png" alt="The Search and Replace float in replace mode: the fixed-width pattern field with the ⇄ toggle box right after it, then ab, Aa, .* and the ? help boxes — active toggles filled — plus the Replace field with the ⇉ Replace All icon box, the Files-to-Include filter and a ripgrep results tree showing every match and its old/new line" width="88%">
+      <img src="img/preview.png" alt="The Search and Replace float in replace mode: the ⇄ toggle box left of the fixed-width pattern field, then Aa, ab and .* boxes — active toggles filled — plus the Replace field with the AB preserve-case and ⇉ Replace All icon boxes, the Files-to-Include filter and a ripgrep results tree showing every match and its old/new line" width="88%">
     </td>
   </tr>
 </table>
@@ -27,8 +27,8 @@ UI with live results, inline diff previews, and ripgrep speed. Built on
 
 - 🔍 **live results** while you type, powered by ripgrep
 - 🎨 **inline diff preview** per match, with `\1`–`\9` capture references
-- ⌨️ **VS Code-style toggle boxes** — `⇄` replace mode · `ab` whole word · `Aa` match case · `.*` regex
-- 🪟 **search-only to start**; pressing `⇄` reveals the replace row without ever resizing the search box
+- ⌨️ **VS Code-style toggle boxes** — `⇄` replace mode · `Aa` match case · `ab` whole word · `.*` regex
+- 🪟 **search-only to start**; `Tab` off the search field lands on `⇄` — activating it reveals the replace row and focuses the replace field without ever resizing the search box
 - 🖱️ **mouse-friendly**: every box, field and button is clickable
 - ✅ **Replace All asks first** with a Yes/No dialog before touching any file
 - 📂 **search variants** for the current file and the word under cursor / visual selection
@@ -93,9 +93,8 @@ require("vscode-search-replace").setup({
   icons = {
     tree_expanded = "\u{F107}", -- chevron before an expanded file row
     tree_collapsed = "\u{F105}", -- chevron before a collapsed file row
-    replace_mode = "⇄", -- search row box: show/hide the replace row
+    replace_mode = "⇄", -- search row box left of Search: show/hide the replace row
     replace_all = "⇉", -- Replace All box
-    help = "?", -- help box
     case = "Aa",
     whole_word = "ab",
     regex = ".*",
@@ -117,9 +116,10 @@ require("vscode-search-replace").open()
 require("vscode-search-replace").open({ file = true, word = true })
 ```
 
-The float opens in search-only mode; press the `⇄` box (right of Search — or
-just `Tab` from the search field) to show the replace row: the replace field
-and the `⇉` (Replace All) icon box.
+The float opens in search-only mode. `Tab` from the search field stops on the
+`⇄` box (left of Search); `Enter`/`Space`/click reveals the replace row — the
+replace field with the `AB` and `⇉` boxes at its right — and drops the cursor
+into the replace field.
 
 Troubleshooting: `:checkhealth vscode-search-replace`
 

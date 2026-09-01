@@ -45,6 +45,10 @@ function M.create(opts)
             close_confirm()
             opts.on_closed()
         end,
+        -- The built-in Tab/S-Tab walk follows the layout tree, but ⇄ must tab
+        -- AFTER Search while sitting LEFT of it visually — so the ring lives
+        -- in panel_step below and nui's own handlers are switched off.
+        keymap = { focus_next = false, focus_prev = false },
     })
 
     -- signals wrap an OBJECT; reading a field yields the SignalValue the props
@@ -571,17 +575,21 @@ function M.create(opts)
     -- showing/hiding it would re-flow the flex row and resize the search box
     -- on every mode switch, which is exactly what a find widget must not do.
     local tb_whole = toggle_button("whole", "whole_word", icons.whole_word, "<A-w>", schedule)
-    -- The replace-mode toggle is an ICON box (VS Code shows a chevron there,
-    -- not the word): ⇄ sits RIGHT of Search — the first Tab stop after the
-    -- input (VS Code's find-widget flow: search → Tab → toggle) — and
-    -- reveals/hides the replace ROW (Replace input · AB · ⇉). Leaving replace
-    -- mode also drops preserve-case so a hidden box can never silently reshape
-    -- replacements.
+    -- ⇄ sits LEFT of Search but is the FIRST TAB STOP after the search field
+    -- (explicit panel ring — see panel_step): activating it reveals the
+    -- replace ROW (Replace input · AB · ⇉) and jumps the cursor into the
+    -- Replace input. Leaving replace mode also drops preserve-case so a
+    -- hidden box can never silently reshape replacements.
+    local focus_replace_input
     local tb_mode = toggle_button("replace", nil, icons.replace_mode, nil, function(value)
+        -- extra runs after the button has already flipped its state
         if not value and toggles:get_value().preserve then
             toggles.preserve = false
             params.preserve_case = false
             schedule()
+        end
+        if value then
+            focus_replace_input()
         end
         -- Re-attach Alt/? maps so the freshly visible widgets participate.
         -- defer (not schedule): the renderer recomputes its focusable list
@@ -589,20 +597,6 @@ function M.create(opts)
         -- widgets instead of the stale pre-toggle list.
         vim.defer_fn(attach_panel_maps, 60)
     end)
-    -- discoverability for the keymap overlay: the panel-local `?` mapping
-    -- works, but a visible box tells the user the help exists. Same float.
-    local tb_help = n.button({
-        label = icons.help,
-        border_style = "rounded",
-        on_press = function(self)
-            toggle_help(self.winid)
-        end,
-        on_mount = function(self)
-            arm_mouse(self, function()
-                toggle_help(self.winid)
-            end)
-        end,
-    })
     -- VS Code's preserve-case ("AB") box lives in the REPLACE ROW (hidden
     -- with it); its Alt+P hotkey is guarded because global_press_key also
     -- fires while the row is hidden.
@@ -688,7 +682,7 @@ function M.create(opts)
         end,
     })
 
-    -- 50/50 split: the search row (input + ⇄ + ab + Aa + .* + ?) needs the
+    -- 50/50 split: the search row (⇄ + input + Aa + ab + .*) needs the
     -- sidebar wide enough that flex=1 still leaves a usable input at ~80-col
     -- terminals; the tree truncates gracefully. The replace row hides as a
     -- WHOLE ROW (is_hidden walks the parent chain, so its children leave the
@@ -697,18 +691,16 @@ function M.create(opts)
         { flex = 50 },
         n.columns(
             { flex = 0, size = 1 },
-            ti_search,
+            tb_mode,
             -- one blank column keeps every box border clear of its neighbours
             n.gap(1),
-            tb_mode,
-            n.gap(1),
-            tb_whole,
+            ti_search,
             n.gap(1),
             tb_case,
             n.gap(1),
-            tb_regex,
+            tb_whole,
             n.gap(1),
-            tb_help
+            tb_regex
         ),
         n.columns(
             { flex = 0, size = 1, hidden = hidden_unless_replace() },
@@ -751,6 +743,60 @@ function M.create(opts)
             vim.cmd("stopinsert")
         end
     end
+    -- Explicit panel ring: ⇄ is the first stop AFTER the search field while
+    -- sitting left of it visually — impossible via nui's tree-order Tab, so
+    -- the built-in focus_next/focus_prev are disabled at create_renderer and
+    -- the walk lives here. Widgets of the hidden replace row drop out
+    -- automatically (Component:is_hidden() walks the parent chain).
+    local panel_order = {
+        ti_search, tb_mode, ti_replace, tb_case, tb_whole, tb_regex,
+        tb_preserve, btn_replace, ti_include, tree_comp,
+    }
+    local function visible_order()
+        local list = {}
+        for _, c in ipairs(panel_order) do
+            if not c:is_hidden() then
+                table.insert(list, c)
+            end
+        end
+        return list
+    end
+    local function panel_step(dir)
+        local list = visible_order()
+        if #list == 0 then
+            return
+        end
+        -- resolve current by window id, not renderer:get_last_focused_component():
+        -- BufEnter/BufLeave both write it, so the blurred component can end up
+        -- recorded last (the unreliability the Alt-nav comment documents).
+        local cur_win = vim.api.nvim_get_current_win()
+        local idx
+        for i, c in ipairs(list) do
+            if c.winid == cur_win then
+                idx = i
+            end
+        end
+        focus_component(idx and list[(idx - 1 + dir) % #list + 1] or list[1])
+    end
+    -- The revealed row's popup is created by the debounced layout update;
+    -- retry on a timer until ti_replace has a live window, then focus +
+    -- startinsert. (defer, not schedule: the retry must keep ticking across
+    -- event-loop iterations, like the attach_panel_maps defer below.)
+    focus_replace_input = function()
+        local tries = 0
+        local function go()
+            tries = tries + 1
+            if closed then
+                return
+            end
+            if ti_replace.winid and vim.api.nvim_win_is_valid(ti_replace.winid) then
+                focus_component(ti_replace)
+            elseif tries < 100 then
+                vim.defer_fn(go, 20)
+            end
+        end
+        vim.defer_fn(go, 20)
+    end
 
     -- Walk by CAPTURED index, not runtime is_focused() scans: the renderer's
     -- own Tab handlers bind per-component closures the same way (a component's
@@ -775,7 +821,7 @@ function M.create(opts)
             { "Alt+C", ("toggle %s  match case"):format(icons.case) },
             { "Alt+W", ("toggle %s  whole word"):format(icons.whole_word) },
             { "Alt+R", ("toggle %s  regular expression"):format(icons.regex) },
-            { ("%s box"):format(icons.replace_mode), "show/hide the replace row" },
+            { ("%s box"):format(icons.replace_mode), "show the replace row and jump to its input" },
         } },
         { "Replace", {
             { "Alt+P", ("toggle %s  preserve case"):format(icons.preserve_case) },
@@ -788,7 +834,7 @@ function M.create(opts)
             { "zc", "collapse all files — press again to expand" },
         } },
         { "General", {
-            { ("? / the %s box"):format(icons.help), "show/hide this help" },
+            { "?", "show/hide this help" },
             { "q / Esc / <leader>fs", "close the panel" },
         } },
     }
@@ -854,7 +900,7 @@ function M.create(opts)
     -- attach_panel_maps still re-registers maps on freshly visible components
     -- (c:map re-registration is idempotent).
     local function sibling(cur, dir)
-        local list = renderer:get_focusable_components()
+        local list = visible_order()
         for i, x in ipairs(list) do
             if x == cur then
                 return list[(i - 1 + dir) % #list + 1]
@@ -901,6 +947,14 @@ function M.create(opts)
         { mode = "n", key = "q", handler = close },
         { mode = { "n", "i" }, key = "<leader>S", handler = close },
         { mode = { "n", "i" }, key = "<leader>fs", handler = close },
+    })
+    -- Custom Tab/S-Tab ring (the renderer's built-in tree walk is disabled;
+    -- see create_renderer above). add_mappings entries attach AFTER the
+    -- defaults on every component's popup buffer, including row-2 widgets
+    -- mounted later when the replace row is revealed.
+    renderer:add_mappings({
+        { mode = { "n", "i" }, key = "<Tab>", handler = function() panel_step(1) end },
+        { mode = { "n", "i" }, key = "<S-Tab>", handler = function() panel_step(-1) end },
     })
 
     return { close = close }
