@@ -28,7 +28,7 @@ UI with live results, inline diff previews, and ripgrep speed. Built on
 - 🔍 **live results** while you type, powered by ripgrep
 - 🎨 **inline diff preview** per match, with `\1`–`\9` capture references
 - ⌨️ **VS Code-style toggle boxes** — `⇄` replace mode · `Aa` match case · `ab` whole word · `.*` regex
-- 🪟 **search-only to start**; `Tab` off the search field lands on `⇄` — activating it reveals the replace row and focuses the replace field without ever resizing the search box
+- 🪟 **search-only to start**; `Tab` off the search field lands on `⇄` — activating it reveals the replace row and focuses the replace field without ever resizing the search box; `Enter` in the search field jumps to the results tree
 - 🖱️ **mouse-friendly**: every box, field and button is clickable
 - ✅ **Replace All asks first** with a Yes/No dialog before touching any file
 - 📂 **search variants** for the current file and the word under cursor / visual selection
@@ -98,7 +98,7 @@ require("vscode-search-replace").setup({
     case = "Aa",
     whole_word = "ab",
     regex = ".*",
-  },
+    preserve_case = "AB", -- replace row box: replacements adopt each match's case
 })
 ```
 
@@ -119,7 +119,9 @@ require("vscode-search-replace").open({ file = true, word = true })
 The float opens in search-only mode. `Tab` from the search field stops on the
 `⇄` box (left of Search); `Enter`/`Space`/click reveals the replace row — the
 replace field with the `AB` and `⇉` boxes at its right — and drops the cursor
-into the replace field.
+into the replace field. From there `Tab` walks that row (`AB`, `⇉`) before the
+search-row toggles, and `Enter` in the search field jumps straight to the
+results tree.
 
 Troubleshooting: `:checkhealth vscode-search-replace`
 
@@ -133,8 +135,7 @@ wherever focus is. Press `?` inside the float to see this list.
 | --------------------- | ----- | ------------------------------------------------ |
 | `<Tab>` / `<S-Tab>`   | n/i   | next / previous panel                            |
 | `Alt+h` / `Alt+l`     | n/i   | sidebar ⇄ results tree                           |
-| `Alt+j` / `Alt+k`     | n/i   | previous / next panel in focus order             |
-| `Enter` / `Space` / click | n/i | activate focused widget · jump to selected match |
+| `Enter` / `Space` / click | n/i | in Search: jump to results tree · else activate focused widget · jump to selected match |
 | `Alt+c`               | n/i   | toggle `Aa` — match case                         |
 | `Alt+w`               | n/i   | toggle `ab` — match whole word                   |
 | `Alt+r`               | n/i   | toggle `.*` — regular expression                 |

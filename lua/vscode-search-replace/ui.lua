@@ -747,10 +747,15 @@ function M.create(opts)
     -- sitting left of it visually — impossible via nui's tree-order Tab, so
     -- the built-in focus_next/focus_prev are disabled at create_renderer and
     -- the walk lives here. Widgets of the hidden replace row drop out
-    -- automatically (Component:is_hidden() walks the parent chain).
+    -- automatically (Component:is_hidden() walks the parent chain). Once the
+    -- ring enters the REPLACE ROW it finishes that row (Replace · AB · ⇉)
+    -- before climbing back to the search-row toggles — a Tab off the replace
+    -- field must land on AB, not jump rows to Aa.
     local panel_order = {
-        ti_search, tb_mode, ti_replace, tb_case, tb_whole, tb_regex,
-        tb_preserve, btn_replace, ti_include, tree_comp,
+        ti_search, tb_mode,
+        ti_replace, tb_preserve, btn_replace,
+        tb_case, tb_whole, tb_regex,
+        ti_include, tree_comp,
     }
     local function visible_order()
         local list = {}
@@ -808,36 +813,41 @@ function M.create(opts)
     local HELP_HEADER = "vscode-search-replace — keymaps"
     -- Sections, not a flat list: the overlay is the discoverability surface,
     -- so group rows by intent and color keys apart from descriptions.
-    -- Descriptions interpolate cfg.icons so the help always names the glyphs
-    -- the panel actually shows.
-    local HELP_SECTIONS = {
-        { "Navigation", {
-            { "<Tab> / <S-Tab>", "next / previous panel" },
-            { "Alt+h / Alt+l", "sidebar <-> results tree" },
-            { "Alt+j / Alt+k", "previous / next panel" },
-            { "Enter / Space / click", "activate the focused widget" },
-        } },
-        { "Search", {
-            { "Alt+C", ("toggle %s  match case"):format(icons.case) },
-            { "Alt+W", ("toggle %s  whole word"):format(icons.whole_word) },
-            { "Alt+R", ("toggle %s  regular expression"):format(icons.regex) },
-            { ("%s box"):format(icons.replace_mode), "show the replace row and jump to its input" },
-        } },
-        { "Replace", {
-            { "Alt+P", ("toggle %s  preserve case"):format(icons.preserve_case) },
-            { ("Ctrl+Alt+Enter / %s box"):format(icons.replace_all), "Replace All" },
-            { "y / n  ·  Enter / Esc", "answer the Replace All dialog" },
-        } },
-        { "Results", {
-            { "j / k", "move between rows" },
-            { "Enter / click", "jump to the selected match" },
-            { "zc", "collapse all files — press again to expand" },
-        } },
-        { "General", {
-            { "?", "show/hide this help" },
-            { "q / Esc / <leader>fs", "close the panel" },
-        } },
-    }
+    -- Built FRESH on every open from config.get() — re-running setup() with
+    -- new icons resyncs the glyphs the help names, not just the ones baked
+    -- in when this panel was created.
+    local function help_sections()
+        local ic = config.get().icons
+        return {
+            { "Navigation", {
+                { "<Tab> / <S-Tab>", "next / previous panel" },
+                { "Alt+h / Alt+l", "sidebar <-> results tree" },
+                { "Alt+j / Alt+k", "previous / next panel" },
+                { "Enter / Space / click", "activate the focused widget" },
+            } },
+            { "Search", {
+                { "Enter", "jump from the Search field to the results tree" },
+                { "Alt+C", ("toggle %s  match case"):format(ic.case) },
+                { "Alt+W", ("toggle %s  whole word"):format(ic.whole_word) },
+                { "Alt+R", ("toggle %s  regular expression"):format(ic.regex) },
+                { ("%s box"):format(ic.replace_mode), "show the replace row and jump to its input" },
+            } },
+            { "Replace", {
+                { "Alt+P", ("toggle %s  preserve case"):format(ic.preserve_case) },
+                { ("Ctrl+Alt+Enter / %s box"):format(ic.replace_all), "Replace All" },
+                { "y / n  ·  Enter / Esc", "answer the Replace All dialog" },
+            } },
+            { "Results", {
+                { "j / k", "move between rows" },
+                { "Enter / click", "jump to the selected match" },
+                { "zc", "collapse all files — press again to expand" },
+            } },
+            { "General", {
+                { "?", "show/hide this help" },
+                { "q / Esc / <leader>fs", "close the panel" },
+            } },
+        }
+    end
     local help_buf, help_win = nil, nil
     local function close_help()
         if help_win and vim.api.nvim_win_is_valid(help_win) then
@@ -858,7 +868,8 @@ function M.create(opts)
         local lines = { HELP_HEADER }
         -- row is the 0-based index the line WILL have once appended
         local marks = { { row = 0, col = #HELP_HEADER, hl = "Label" } }
-        for _, section in ipairs(HELP_SECTIONS) do
+        local sections = help_sections()
+        for _, section in ipairs(sections) do
             table.insert(lines, "")
             table.insert(marks, { row = #lines, col = #section[1], hl = "Function" })
             table.insert(lines, section[1])
@@ -914,6 +925,20 @@ function M.create(opts)
                 toggle_help(c.winid)
             end, { noremap = true })
             c:map("n", "zc", toggle_collapse_all, { noremap = true })
+            -- VS Code "focus search results": Enter off the Search field
+            -- jumps to the results tree (j/k then Enter picks a match).
+            -- Mount re-registers TextInput's own insert <CR> (a no-op at
+            -- max_lines=1) AFTER any pre-mount registration, so this map
+            -- only sticks when attached post-mount — which the deferred
+            -- re-attach at the bottom of create() guarantees (nui keymap.set
+            -- overwrites the same mode+key).
+            if c == ti_search then
+                for _, m in ipairs({ "n", "i" }) do
+                    c:map(m, "<CR>", function()
+                        focus_component(tree_comp)
+                    end, { noremap = true })
+                end
+            end
             for _, m in ipairs({ "n", "i" }) do
                 c:map(m, "<A-j>", function()
                     focus_component(sibling(c, 1))
@@ -956,6 +981,10 @@ function M.create(opts)
         { mode = { "n", "i" }, key = "<Tab>", handler = function() panel_step(1) end },
         { mode = { "n", "i" }, key = "<S-Tab>", handler = function() panel_step(-1) end },
     })
+    -- Re-attach the panel maps once the first mount has settled (the comment
+    -- on the <CR> map above explains why a pre-mount registration is not
+    -- enough); the 60ms idiom matches tb_mode's extra() re-attach.
+    vim.defer_fn(attach_panel_maps, 60)
 
     return { close = close }
 end
