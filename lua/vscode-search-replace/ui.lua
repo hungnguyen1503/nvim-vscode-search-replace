@@ -566,6 +566,10 @@ function M.create(opts)
             on_press = press,
             on_mount = function(self)
                 arm_mouse(self, press)
+                -- Mount re-creates the buffer, wiping any c:map registrations
+                -- the toggle-time defer missed: re-attach right HERE so the
+                -- Alt+h/l/j/k + ? + zc maps always live on the visible buffer.
+                vim.schedule(attach_panel_maps)
             end,
         })
     end
@@ -614,6 +618,7 @@ function M.create(opts)
         end,
         on_mount = function(self)
             arm_input(self)
+            vim.schedule(attach_panel_maps)
         end,
     })
     local ti_include = n.text_input({
@@ -626,6 +631,7 @@ function M.create(opts)
         end,
         on_mount = function(self)
             arm_input(self)
+            vim.schedule(attach_panel_maps)
         end,
     })
 
@@ -679,6 +685,7 @@ function M.create(opts)
         on_press = replace_all,
         on_mount = function(self)
             arm_mouse(self, replace_all)
+            vim.schedule(attach_panel_maps)
         end,
     })
 
@@ -747,14 +754,15 @@ function M.create(opts)
     -- sitting left of it visually — impossible via nui's tree-order Tab, so
     -- the built-in focus_next/focus_prev are disabled at create_renderer and
     -- the walk lives here. Widgets of the hidden replace row drop out
-    -- automatically (Component:is_hidden() walks the parent chain). Once the
-    -- ring enters the REPLACE ROW it finishes that row (Replace · AB · ⇉)
-    -- before climbing back to the search-row toggles — a Tab off the replace
-    -- field must land on AB, not jump rows to Aa.
+    -- automatically (Component:is_hidden() walks the parent chain). The ring
+    -- follows visual reading order: search row (Search · ⇄ · Aa · ab · .*),
+    -- replace row (Replace · AB · ⇉), then Files to Include, then the
+    -- results tree — so a Tab off ⇉ lands on the include field, not back up
+    -- on Aa.
     local panel_order = {
         ti_search, tb_mode,
-        ti_replace, tb_preserve, btn_replace,
         tb_case, tb_whole, tb_regex,
+        ti_replace, tb_preserve, btn_replace,
         ti_include, tree_comp,
     }
     local function visible_order()
@@ -822,7 +830,7 @@ function M.create(opts)
             { "Navigation", {
                 { "<Tab> / <S-Tab>", "next / previous panel" },
                 { "Alt+h / Alt+l", "sidebar <-> results tree" },
-                { "Alt+j / Alt+k", "previous / next panel" },
+                { "Alt+j / Alt+k", "previous / next text field" },
                 { "Enter / Space / click", "activate the focused widget" },
             } },
             { "Search", {
@@ -905,20 +913,32 @@ function M.create(opts)
         end
     end
 
-    -- Walk by LIVE index (renderer recomputes get_focusable_components() on
-    -- every redraw) instead of captured next/prev closures: a widget shown or
-    -- hidden after the last attach can then never be skipped or mis-wired.
-    -- attach_panel_maps still re-registers maps on freshly visible components
-    -- (c:map re-registration is idempotent).
-    local function sibling(cur, dir)
-        local list = visible_order()
-        for i, x in ipairs(list) do
-            if x == cur then
+    -- Alt+j/k hop between the TEXT FIELDS only (VS Code field navigation):
+    -- Search · Replace · Files to Include. The list is computed by LIVE
+    -- visibility on every keypress (Component:is_hidden() walks the parent
+    -- chain), so a hidden replace row can never be landed on. From a
+    -- non-field widget Alt+j enters the ring at the first field and Alt+k
+    -- at the last.
+    local input_order = { ti_search, ti_replace, ti_include }
+    local function input_step(cur, dir)
+        local list = {}
+        for _, c in ipairs(input_order) do
+            if not c:is_hidden() then
+                table.insert(list, c)
+            end
+        end
+        for i, c in ipairs(list) do
+            if c == cur then
                 return list[(i - 1 + dir) % #list + 1]
             end
         end
-        return list[1]
+        return dir > 0 and list[1] or list[#list]
     end
+    -- Walk by LIVE component list (renderer recomputes
+    -- get_focusable_components() on every redraw) instead of captured
+    -- closures: a widget shown or hidden after the last attach can then
+    -- never be skipped or mis-wired. attach_panel_maps still re-registers
+    -- maps on freshly visible components (c:map is idempotent).
     attach_panel_maps = function()
         for _, c in ipairs(renderer:get_focusable_components()) do
             c:map("n", "?", function()
@@ -941,10 +961,10 @@ function M.create(opts)
             end
             for _, m in ipairs({ "n", "i" }) do
                 c:map(m, "<A-j>", function()
-                    focus_component(sibling(c, 1))
+                    focus_component(input_step(c, 1))
                 end, { noremap = true })
                 c:map(m, "<A-k>", function()
-                    focus_component(sibling(c, -1))
+                    focus_component(input_step(c, -1))
                 end, { noremap = true })
                 -- h and l both switch columns: sidebar -> tree, tree -> last field
                 c:map(m, "<A-l>", function()

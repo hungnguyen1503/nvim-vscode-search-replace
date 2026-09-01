@@ -134,15 +134,17 @@ Keys inside the float: ~
     Alt+r           toggle `.*` regular expression
     Alt+p           toggle `AB` preserve case (replace mode only)
     Alt+h/Alt+l     move to the previous/next panel column
-    Alt+j/Alt+k     move to the next/previous panel in a column
+    Alt+j/Alt+k     hop to the next/previous text field (Search ·
+                    Replace · Files to Include)
     ?               show/hide the keymap help overlay
     zc              collapse all files in the results tree; press again to
                     expand them all (normal mode, any panel)
 
     The toggle boxes fill (reverse video) while their option is active.
-    Focus order: Search -> `⇄` -> Replace input -> `AB` -> `⇉` -> `Aa` ->
-    `ab` -> `.*` -> Files to Include -> results tree; hidden widgets leave
-    the cycle while the Replace row is hidden. Pressing `⇄`
+    Focus order: Search -> `⇄` -> `Aa` -> `ab` -> `.*` -> Replace input ->
+    `AB` -> `⇉` -> Files to Include -> results tree; hidden widgets leave
+    the cycle while the Replace row is hidden. `Alt+j`/`Alt+k` skip the
+    boxes and hop directly between the three text fields. Pressing `⇄`
     (`Enter`/`Space`/click) shows the row and moves the cursor into the
     replace field; pressing again hides it — and hides `AB` with it. The
     search box never resizes between modes.

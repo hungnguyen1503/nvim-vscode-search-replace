@@ -119,21 +119,24 @@ require("vscode-search-replace").open({ file = true, word = true })
 The float opens in search-only mode. `Tab` from the search field stops on the
 `⇄` box (left of Search); `Enter`/`Space`/click reveals the replace row — the
 replace field with the `AB` and `⇉` boxes at its right — and drops the cursor
-into the replace field. From there `Tab` walks that row (`AB`, `⇉`) before the
-search-row toggles, and `Enter` in the search field jumps straight to the
-results tree.
+into the replace field. From there `Tab` keeps walking in visual order
+(`AB` → `⇉` → Files to Include → results tree), and `Enter` in the search
+field jumps straight to the results tree. `Alt+j`/`Alt+k` hop directly
+between the three text fields (Search · Replace · Files to Include).
 
 Troubleshooting: `:checkhealth vscode-search-replace`
 
 ## ⌨️ Keymaps
 
-Every panel is reachable — `Tab`/`Shift+Tab` or `Alt+j`/`Alt+k` to walk,
-`Enter`/`Space` or a mouse click to activate — and the `Alt` hotkeys work from
-wherever focus is. Press `?` inside the float to see this list.
+Every panel is reachable — `Tab`/`Shift+Tab` to walk, `Alt+j`/`Alt+k` to hop
+between text fields, `Enter`/`Space` or a mouse click to activate — and the
+`Alt` hotkeys work from wherever focus is. Press `?` inside the float to see
+this list.
 
 | Keymap                | Mode  | Description                                      |
 | --------------------- | ----- | ------------------------------------------------ |
 | `<Tab>` / `<S-Tab>`   | n/i   | next / previous panel                            |
+| `Alt+j` / `Alt+k`         | n/i   | next / previous text field (Search · Replace · Files to Include) |
 | `Alt+h` / `Alt+l`     | n/i   | sidebar ⇄ results tree                           |
 | `Enter` / `Space` / click | n/i | in Search: jump to results tree · else activate focused widget · jump to selected match |
 | `Alt+c`               | n/i   | toggle `Aa` — match case                         |
