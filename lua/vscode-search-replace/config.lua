@@ -10,9 +10,8 @@ local M = {}
 ---@class VscrIcons
 ---@field tree_expanded? string  -- chevron before an expanded file row (default \u{F107})
 ---@field tree_collapsed? string -- chevron before a collapsed file row (default \u{F105})
----@field replace_mode? string   -- \u{21C4} box right of Search
+---@field replace_mode? string   -- \u{21C4} box left of Search
 ---@field replace_all? string    -- \u{21C9} Replace All box
----@field help? string           -- ? box
 ---@field case? string           -- Aa box
 ---@field whole_word? string     -- ab box
 ---@field regex? string          -- .* box
@@ -27,7 +26,6 @@ local defaults = {
         tree_collapsed = "\u{F105}",
         replace_mode = "\u{21C4}", -- ⇄
         replace_all = "\u{21C9}", -- ⇉
-        help = "?",
         case = "Aa",
         whole_word = "ab",
         regex = ".*",

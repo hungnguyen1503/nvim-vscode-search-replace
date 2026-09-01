@@ -1,3 +1,4 @@
 .tests/
 doc/tags
 *.log
+/.codegraph/.gitignore
