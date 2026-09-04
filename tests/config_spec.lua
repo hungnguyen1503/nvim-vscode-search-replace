@@ -121,4 +121,107 @@ describe("config", function()
     assert.same("Aa", config.get().icons.case)
     assert.same("?", config.get().icons.regex)
   end)
+
+  -- Run fn(msgs-captured) around setup and restore vim.notify.
+  local function with_notify(fn)
+    local msgs = {}
+    local notify = vim.notify
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.notify = function(msg, level)
+      msgs[#msgs + 1] = { msg = msg, level = level }
+    end
+    fn()
+    vim.notify = notify
+    return msgs
+  end
+
+  it("has documented keymap defaults", function()
+    local km = config.get().keymap
+    assert.same("<Tab>", km.next_panel)
+    assert.same("<S-Tab>", km.prev_panel)
+    assert.same("<A-j>", km.field_next)
+    assert.same("<A-k>", km.field_prev)
+    assert.same("<A-l>", km.to_tree)
+    assert.same("<A-h>", km.to_field)
+    assert.same("<CR>", km.focus_results)
+    assert.same("<A-c>", km.toggle_case)
+    assert.same("<A-w>", km.toggle_whole_word)
+    assert.same("<A-r>", km.toggle_regex)
+    assert.same("<A-I>", km.toggle_no_ignore)
+    assert.same("<A-H>", km.toggle_hidden)
+    assert.same("<A-p>", km.toggle_preserve_case)
+    assert.same("<C-A-CR>", km.replace_all)
+    assert.same("<C-g>", km.search_method)
+    assert.same("zc", km.collapse_all)
+    assert.same("?", km.help)
+    assert.same({ "q", "<leader>fs", "<leader>S" }, km.close)
+  end)
+
+  it("merges partial keymap overrides", function()
+    config.setup({ keymap = { toggle_case = "<C-c>" } })
+    assert.same("<C-c>", config.get().keymap.toggle_case)
+    -- untouched keys keep defaults (deep merge)
+    assert.same("<A-r>", config.get().keymap.toggle_regex)
+    assert.same("zc", config.get().keymap.collapse_all)
+  end)
+
+  it("accepts false to unbind a keymap action", function()
+    local msgs = with_notify(function()
+      config.setup({ keymap = { collapse_all = false } })
+    end)
+    assert.are.equal(0, #msgs)
+    assert.same(false, config.get().keymap.collapse_all)
+  end)
+
+  it("normalizes close overrides and rebuilds (never array-merges) them", function()
+    config.setup({ keymap = { close = "<leader>cs" } })
+    assert.same({ "<leader>cs" }, config.get().keymap.close)
+
+    config.setup({ keymap = { close = { "q", "<leader>cs" } } })
+    assert.same({ "q", "<leader>cs" }, config.get().keymap.close)
+
+    config.setup({ keymap = { close = false } })
+    assert.same(false, config.get().keymap.close)
+  end)
+
+  it("resets custom keys on the next setup()", function()
+    config.setup({ keymap = { toggle_case = "<C-c>", collapse_all = false } })
+    config.setup({})
+    assert.same("<A-c>", config.get().keymap.toggle_case)
+    assert.same("zc", config.get().keymap.collapse_all)
+    assert.same({ "q", "<leader>fs", "<leader>S" }, config.get().keymap.close)
+  end)
+
+  it("warns and keeps defaults for bad keymap values", function()
+    local msgs = with_notify(function()
+      config.setup({ keymap = "nope" })
+    end)
+    assert.are.equal(1, #msgs)
+    assert.are.equal(vim.log.levels.WARN, msgs[1].level)
+    assert.matches('"keymap"', msgs[1].msg)
+    assert.same("<A-c>", config.get().keymap.toggle_case)
+
+    msgs = with_notify(function()
+      -- a non-string/non-false value warns; valid siblings survive
+      config.setup({ keymap = { toggle_case = 42, toggle_regex = "<C-r>" } })
+    end)
+    assert.are.equal(1, #msgs)
+    assert.matches('keymap "toggle_case"', msgs[1].msg)
+    assert.same("<A-c>", config.get().keymap.toggle_case)
+    assert.same("<C-r>", config.get().keymap.toggle_regex)
+
+    msgs = with_notify(function()
+      config.setup({ keymap = { close = { "q", 7 } } })
+    end)
+    assert.are.equal(1, #msgs)
+    assert.matches('keymap "close"', msgs[1].msg)
+    assert.same({ "q", "<leader>fs", "<leader>S" }, config.get().keymap.close)
+
+    msgs = with_notify(function()
+      config.setup({ keymap = { close = {} } })
+    end)
+    assert.are.equal(1, #msgs)
+    assert.matches('keymap "close"', msgs[1].msg)
+    assert.same({ "q", "<leader>fs", "<leader>S" }, config.get().keymap.close)
+  end)
 end)

@@ -14,27 +14,22 @@ UI with live results, inline diff previews, and ripgrep speed. Built on
 
 <table>
   <tr>
-    <th align="center">Search-only to start — the toggle boxes fill while active; press <code>⇄</code> for the full panel</th>
+    <th align="center">Search-only to start — press <code>⇄</code> for the full replace panel</th>
   </tr>
   <tr>
     <td align="center">
-      <img src="img/preview.png" alt="The Search and Replace float in replace mode: the ⇄ toggle box left of the fixed-width pattern field, then Aa, ab, .*, I and H boxes — active toggles filled — plus the Replace field with the AB preserve-case and ⇉ Replace All icon boxes, the Files-to-Include filter and a ripgrep results tree showing every match and its old/new line" width="88%">
+      <img src="img/preview.png" alt="The Search and Replace float: toggle boxes Aa, ab, .*, I, H around the pattern field, a Replace field with AB and ⇉ boxes, a Files-to-Include filter and a ripgrep results tree with old/new diffs" width="88%">
     </td>
   </tr>
 </table>
 
 ## ✨ Features
 
-- 🔍 **live results** while you type, powered by ripgrep
-- 📈 **streamed on huge repos**: partial results paint during a 10–30 s scan,
-  `Ctrl+G` switches to **on-demand** search where the scan starts only on `Enter`
-- ⌨️ **VS Code-style toggle boxes** — `⇄` replace mode · `Aa` match case · `ab` whole word · `.*` regex · plus fzf-style `I` (include git-ignored files) and `H` (include hidden files) — both **lit by default**; the `.git` directory is never searched
-- 🪟 **search-only to start**; `Tab` off the search field lands on `⇄` — activating it reveals the replace row and focuses the replace field without ever resizing the search box; `Enter` in the search field jumps to the results tree
-- 🖱️ **mouse-friendly**: every box, field and button is clickable
-- ✅ **Replace All asks first** with a Yes/No dialog before touching any file
-- 📂 **search variants** for the current file and the word under cursor / visual selection
-- 🧭 **panel navigation on `Alt+h/j/k/l`** — no plugin keymaps stolen from you
-- 🔧 **every glyph is configurable** via the `icons` table in `setup()`
+- 🔍 **live ripgrep results** while you type, with an inline old/new diff per match — partial results paint during long scans and `Ctrl+G` switches to **on-demand** search
+- ⌨️ **VS Code find-widget look** — `⇄` reveals the replace row without ever resizing the search box; `Aa` case · `ab` whole word · `.*` regex · `I` git-ignored · `H` hidden (scope boxes lit by default; `.git` never searched) · `AB` preserve case
+- 🖱️ **mouse-friendly**: click any box, field or result — and **Replace All asks first** with a Yes/No dialog
+- 📂 **variants**: whole project, current file, word under cursor / visual selection
+- 🎛️ **fully configurable**: every glyph (`icons`) and every key (`keymap`) is overridable; the plugin ships **no global keymaps**
 
 ## ⚡️ Requirements
 
@@ -51,34 +46,36 @@ UI with live results, inline diff previews, and ripgrep speed. Built on
   cmd = "SearchReplace",
   opts = {}, -- or call setup() by hand, see below
   keys = {
-    {
-      "<leader>fs",
-      mode = "n",
-      function()
-        require("vscode-search-replace").open()
-      end,
-      desc = "Search & Replace",
-    },
-    {
-      "<leader>sw",
-      mode = { "n", "v" },
-      function()
-        require("vscode-search-replace").open({ word = true })
-      end,
-      desc = "Search word under cursor / selection",
-    },
-    -- Variants (bind any key yourself — the plugin ships no global keymaps):
-    -- current-file search for the word under cursor:
-    --   { "<leader>ff", function() require("vscode-search-replace").open({ file = true, word = true }) end, desc = "Search word in current file" },
+    { "<leader>fs", function() require("vscode-search-replace").open() end, desc = "Search & Replace" },
+    { "<leader>sw", mode = { "n", "v" }, function() require("vscode-search-replace").open({ word = true }) end, desc = "Search word / selection" },
+    -- More variants (bind any key — the plugin ships no global keymaps):
+    --   open({ file = true })                search the current file
+    --   open({ file = true, word = true })   search the word under cursor in it
   },
 }
 ```
 
 ## ⚙️ Configuration
 
-**nvim-vscode-search-replace** works out of the box. Please refer to the default settings below.
+Works out of the box — override only what you want. Only three things to know about `keymap`:
 
-<details><summary>Default Settings</summary>
+1. **Partial tables keep the defaults** — listing one key changes just that key.
+2. Values are Neovim keycodes (`"<A-c>"`, `"zc"`, `"<leader>gs"`); `false` unbinds an action.
+3. Built-in keys that can't be remapped: `Esc` (close), `Enter`/`Space` (activate), tree `j`/`k`, dialog `y`/`n`.
+
+```lua
+require("vscode-search-replace").setup({
+  debounce = 500,            -- ms before re-searching after you stop typing
+  keymap = {
+    toggle_case = "<C-c>",   -- remap one box hotkey
+    collapse_all = false,    -- unbind it entirely
+    close = { "q", "<leader>gs" },  -- close accepts a list
+  },
+  icons = { case = "CC" },   -- glyphs work the same way: partial = rest default
+})
+```
+
+<details><summary>Full default settings</summary>
 
 ```lua
 require("vscode-search-replace").setup({
@@ -90,18 +87,40 @@ require("vscode-search-replace").setup({
   height = 0.85,
   -- ms after the last keystroke before the re-search fires
   debounce = 300,
-  -- every glyph is overridable; omitted keys keep the defaults below
+  -- glyphs; omitted keys keep the defaults below
   icons = {
-    tree_expanded = "\u{F107}", -- chevron before an expanded file row
-    tree_collapsed = "\u{F105}", -- chevron before a collapsed file row
-    replace_mode = "⇄", -- search row box left of Search: show/hide the replace row
-    replace_all = "⇉", -- Replace All box
+    tree_expanded = "\u{F107}",   -- chevron before an expanded file row
+    tree_collapsed = "\u{F105}",  -- chevron before a collapsed file row
+    replace_mode = "⇄",           -- search row box left of Search: show/hide the replace row
+    replace_all = "⇉",            -- Replace All box
     case = "Aa",
     whole_word = "ab",
     regex = ".*",
-    no_ignore = "I", -- search row box: include git-ignored files (Alt+I)
-    hidden = "H", -- search row box: include hidden files (Alt+H)
-    preserve_case = "AB", -- replace row box: replacements adopt each match's case
+    no_ignore = "I",              -- include git-ignored files (Alt+I)
+    hidden = "H",                 -- include hidden files (Alt+H)
+    preserve_case = "AB",         -- replacements adopt each match's case
+  },
+  -- panel bindings; false unbinds; omitted keys keep the defaults below
+  keymap = {
+    next_panel = "<Tab>",         -- next panel
+    prev_panel = "<S-Tab>",       -- previous panel
+    field_next = "<A-j>",         -- next text field (Search · Replace · Files to Include)
+    field_prev = "<A-k>",         -- previous text field
+    to_tree = "<A-l>",            -- focus the results tree
+    to_field = "<A-h>",           -- tree -> last field (elsewhere: results tree)
+    focus_results = "<CR>",       -- in Search: run search / jump to results tree
+    toggle_case = "<A-c>",        -- Aa box
+    toggle_whole_word = "<A-w>",  -- ab box
+    toggle_regex = "<A-r>",       -- .* box
+    toggle_no_ignore = "<A-I>",   -- I box (press Alt+Shift+i)
+    toggle_hidden = "<A-H>",      -- H box (press Alt+Shift+h)
+    toggle_preserve_case = "<A-p>", -- AB box (replace mode only)
+    replace_all = "<C-A-CR>",     -- Replace All (Ctrl+Alt+Enter, asks first)
+    search_method = "<C-g>",      -- live <-> on-demand search
+    collapse_all = "zc",          -- collapse/expand all files in the tree
+    help = "?",                   -- show/hide the keymap overlay
+    close = { "q", "<leader>fs", "<leader>S" },  -- Esc always closes, too
+  },
 })
 ```
 
@@ -109,53 +128,40 @@ require("vscode-search-replace").setup({
 
 ## 🚀 Usage
 
-Open with `:SearchReplace` (`:h vscode-search-replace` for the full help), or
-call the Lua API — `opts = {}` searches the whole project (cwd), `{ file = true }`
-the current file only, `{ word = true }` prefills the pattern from the visual
-selection / word under cursor and searches immediately:
+Open with `:SearchReplace`, or the Lua API — `open()` searches the whole
+project (cwd), `{ file = true }` the current file only, `{ word = true }`
+prefills from the visual selection / word under cursor, `{ pattern = "..." }`
+starts with a fixed pattern:
 
 ```lua
 require("vscode-search-replace").open()
 require("vscode-search-replace").open({ file = true, word = true })
 ```
 
-The float opens in search-only mode. `Tab` from the search field stops on the
-`⇄` box (left of Search); `Enter`/`Space`/click reveals the replace row — the
-replace field with the `AB` and `⇉` boxes at its right — and drops the cursor
-into the replace field. From there `Tab` keeps walking in visual order
-(`AB` → `⇉` → Files to Include → results tree), and `Enter` in the search
-field runs the pending search (on-demand mode) or jumps straight to the
-results tree (live mode). `Alt+j`/`Alt+k` hop directly
-between the three text fields (Search · Replace · Files to Include).
-
-Troubleshooting: `:checkhealth vscode-search-replace`
+The float opens search-only — `Tab` lands on `⇄`, which reveals the replace
+row. Full help: `:h vscode-search-replace` · troubleshooting:
+`:checkhealth vscode-search-replace`.
 
 ## ⌨️ Keymaps
 
-Every panel is reachable — `Tab`/`Shift+Tab` to walk, `Alt+j`/`Alt+k` to hop
-between text fields, `Enter`/`Space` or a mouse click to activate — and the
-`Alt` hotkeys work from wherever focus is — `Alt+I`/`Alt+H` are shifted
-codes (press Alt+Shift+i / Alt+Shift+h). Press `?` inside the float to see
-this list.
+These are the **defaults** — every one is remappable via
+`setup({ keymap = ... })` (see Configuration above); press `?`
+inside the panel to see your active bindings.
 
-| Keymap                | Mode  | Description                                      |
-| --------------------- | ----- | ------------------------------------------------ |
-| `<Tab>` / `<S-Tab>`   | n/i   | next / previous panel                            |
-| `Alt+j` / `Alt+k`         | n/i   | next / previous text field (Search · Replace · Files to Include) |
-| `Alt+h` / `Alt+l`     | n/i   | sidebar ⇄ results tree                           |
-| `Enter` / `Space` / click | n/i | in Search: run search (on-demand) or jump to results tree · else activate focused widget · jump to selected match |
-| `Alt+c`               | n/i   | toggle `Aa` — match case                         |
-| `Alt+w`               | n/i   | toggle `ab` — match whole word                   |
-| `Alt+r`               | n/i   | toggle `.*` — regular expression                 |
-| `Alt+I`               | n/i   | toggle `I` — include git-ignored files (lit by default)  |
-| `Alt+H`               | n/i   | toggle `H` — include hidden files (lit by default; `.git` never searched) |
-| `Ctrl+g`              | n/i   | switch live ⇄ on-demand search                   |
-| `Alt+p`               | n/i   | toggle `AB` — preserve case (replace mode)       |
-| `Ctrl+Alt+Enter`      | n/i   | Replace All — asks Yes/No first                  |
-| `y` / `n` · `Enter` / `Esc` | n | answer the Replace All dialog (or click `Yes`/`No`) |
-| `?`                   | n     | show/hide the keymap help                        |
-| `q` / `Esc` / `<leader>fs` | n/i | close                                         |
-| `zc`                  | n     | collapse all files in the tree (press again to expand) |
+| Default key                  | Action                                        |
+| ---------------------------- | --------------------------------------------- |
+| `<Tab>` / `<S-Tab>`          | next / previous panel                         |
+| `Alt+j` / `Alt+k`            | next / previous text field                    |
+| `Alt+h` / `Alt+l`            | results tree ⇄ fields                         |
+| `Enter` / `Space` / click    | activate the focused widget; `Enter` in Search runs the search (on-demand) or jumps to the results tree; in the tree it opens the match |
+| `Alt+c` · `Alt+w` · `Alt+r`  | toggle `Aa` match case · `ab` whole word · `.*` regex |
+| `Alt+I` · `Alt+H`            | toggle `I` include git-ignored · `H` include hidden (lit by default; `.git` never searched) |
+| `Alt+p`                      | toggle `AB` preserve case (replace mode)      |
+| `Ctrl+G`                     | switch live ⇄ on-demand search                |
+| `Ctrl+Alt+Enter` / click `⇉` | Replace All — asks Yes/No first (`y`/`n`)     |
+| `?`                          | show/hide this keymap list (shows your configured keys) |
+| `q` / `Esc` / `<leader>fs`   | close                                         |
+| `zc`                         | collapse / expand all files in the tree       |
 
 ## 🙏 References
 

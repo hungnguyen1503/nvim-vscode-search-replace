@@ -12,6 +12,42 @@ local Text = require("nui.text")
 function M.create(opts)
     local cfg = config.get()
     local icons = cfg.icons
+    local keys = cfg.keymap
+    -- Single-binding action -> keycoded string, or nil when unbound (false).
+    local function bind(name)
+        local v = keys[name]
+        if v == false then
+            return nil
+        end
+        return v
+    end
+    -- Display form for the help overlay: "<A-c>" -> "Alt+c",
+    -- "<C-A-CR>" -> "Ctrl+Alt+Enter", "<leader>fs" -> "Leader+fs",
+    -- lists -> "a / b". Leading modifier tokens are stripped iteratively
+    -- (a bare "<C-S>" stays Ctrl+letter S: only "<X-" prefixes are mods).
+    local MODS = { A = "Alt+", M = "Alt+", C = "Ctrl+", S = "Shift+", D = "Super+" }
+    local NAMES = { CR = "Enter", Tab = "Tab", Esc = "Esc" }
+    local function key_label(v)
+        if type(v) == "table" then
+            local out = {}
+            for _, x in ipairs(v) do
+                out[#out + 1] = key_label(x)
+            end
+            return table.concat(out, " / ")
+        end
+        local s = tostring(v):gsub("^<leader>", "Leader+")
+        local mods = ""
+        while true do
+            local m = s:match("^<([AMCSD])%-")
+            if not m then
+                break
+            end
+            mods = mods .. MODS[m]
+            s = "<" .. s:sub(4)
+        end
+        local name = s:match("^<(.+)>$") or s
+        return mods .. (NAMES[name] or name)
+    end
     -- Sizes resolve to numbers at open time: the renderer needs numeric
     -- sizes (flex layout children read parent:get_size() raw; nui.layout
     -- percentage strings never resolve for them — size.lua:172).
@@ -639,12 +675,12 @@ function M.create(opts)
             end,
         })
     end
-    local tb_case = toggle_button("case", "case_sensitive", icons.case, "<A-c>", schedule)
-    local tb_regex = toggle_button("regex", "regex", icons.regex, "<A-r>", schedule)
+    local tb_case = toggle_button("case", "case_sensitive", icons.case, bind("toggle_case"), schedule)
+    local tb_regex = toggle_button("regex", "regex", icons.regex, bind("toggle_regex"), schedule)
     -- ab is ALWAYS mounted (VS Code keeps its whole-word button permanent):
     -- showing/hiding it would re-flow the flex row and resize the search box
     -- on every mode switch, which is exactly what a find widget must not do.
-    local tb_whole = toggle_button("whole", "whole_word", icons.whole_word, "<A-w>", schedule)
+    local tb_whole = toggle_button("whole", "whole_word", icons.whole_word, bind("toggle_whole_word"), schedule)
     -- fzf-lua parity scope toggles, BOTH ON by default: I = also search
     -- git-ignored files (--no-ignore), H = also hidden/dotfiles (--hidden;
     -- the engine always excludes .git). A LIT box means "these files are in
@@ -652,8 +688,8 @@ function M.create(opts)
     -- Alt+Shift+<letter> as <A-I>/<A-H> (measured under WezTerm CSI-u and
     -- legacy ESC encodings), so they cannot collide with the <A-h> sidebar
     -- navigation binding, and Ctrl+H stays terminal backspace.
-    local tb_ignore = toggle_button("no_ignore", "no_ignore", icons.no_ignore, "<A-I>", schedule)
-    local tb_hidden = toggle_button("hidden", "hidden", icons.hidden, "<A-H>", schedule)
+    local tb_ignore = toggle_button("no_ignore", "no_ignore", icons.no_ignore, bind("toggle_no_ignore"), schedule)
+    local tb_hidden = toggle_button("hidden", "hidden", icons.hidden, bind("toggle_hidden"), schedule)
     -- ⇄ sits LEFT of Search but is the FIRST TAB STOP after the search field
     -- (explicit panel ring — see panel_step): activating it reveals the
     -- replace ROW (Replace input · AB · ⇉) and jumps the cursor into the
@@ -679,7 +715,8 @@ function M.create(opts)
     -- VS Code's preserve-case ("AB") box lives in the REPLACE ROW (hidden
     -- with it); its Alt+P hotkey is guarded because global_press_key also
     -- fires while the row is hidden.
-    local tb_preserve = toggle_button("preserve", "preserve_case", icons.preserve_case, "<A-p>", schedule, function()
+    local tb_preserve = toggle_button("preserve", "preserve_case", icons.preserve_case,
+        bind("toggle_preserve_case"), schedule, function()
         return toggles:get_value().replace
     end)
     local ti_replace = n.text_input({
@@ -757,9 +794,10 @@ function M.create(opts)
     local btn_replace = n.button({
         label = icons.replace_all,
         border_style = "rounded",
-        -- <C-A-CR> normalizes to <M-C-CR> (Neovim multi-modifier keycodes;
-        -- delivered by kitty-keyboard/CSI-u terminals such as WezTerm).
-        global_press_key = "<C-A-CR>",
+        -- Default <C-A-CR> normalizes to <M-C-CR> (Neovim multi-modifier
+        -- keycodes; delivered by kitty-keyboard/CSI-u terminals such as
+        -- WezTerm). Configurable via keymap.replace_all.
+        global_press_key = bind("replace_all"),
         on_press = replace_all,
         on_mount = function(self)
             arm_mouse(self, replace_all)
@@ -911,37 +949,60 @@ function M.create(opts)
     -- in when this panel was created.
     local function help_sections()
         local ic = config.get().icons
+        local km = config.get().keymap
+        -- row(key, desc) yields nil for an unbound (false) action so its
+        -- line drops out of the overlay entirely.
+        local function row(k, desc)
+            if not k then
+                return nil
+            end
+            return { key_label(k), desc }
+        end
+        local function rows(...)
+            local out = {}
+            for _, r in ipairs({ ... }) do
+                if r then
+                    table.insert(out, r)
+                end
+            end
+            return out
+        end
         return {
-            { "Navigation", {
-                { "<Tab> / <S-Tab>", "next / previous panel" },
-                { "Alt+h / Alt+l", "sidebar <-> results tree (unshifted)" },
-                { "Alt+j / Alt+k", "previous / next text field" },
-                { "Enter / Space / click", "activate the focused widget" },
-            } },
-            { "Search", {
-                { "Enter", "jump to the results tree (on-demand: run first)" },
-                { "Alt+C", ("toggle %s  match case"):format(ic.case) },
-                { "Alt+W", ("toggle %s  whole word"):format(ic.whole_word) },
-                { "Alt+R", ("toggle %s  regular expression"):format(ic.regex) },
-                { "Alt+I", ("toggle %s  include git-ignored files (on by default)"):format(ic.no_ignore) },
-                { "Alt+H", ("toggle %s  include hidden files (on by default; .git never searched)"):format(ic.hidden) },
-                { "Ctrl+G", "switch live <-> on-demand search" },
-                { ("%s box"):format(ic.replace_mode), "show the replace row and jump to its input" },
-            } },
-            { "Replace", {
-                { "Alt+P", ("toggle %s  preserve case"):format(ic.preserve_case) },
-                { ("Ctrl+Alt+Enter / %s box"):format(ic.replace_all), "Replace All" },
-                { "y / n  ·  Enter / Esc", "answer the Replace All dialog" },
-            } },
-            { "Results", {
+            { "Navigation", rows(
+                row(km.next_panel, "next panel"),
+                row(km.prev_panel, "previous panel"),
+                row(km.to_tree, "focus the results tree"),
+                row(km.to_field, "tree -> last field (elsewhere: results tree)"),
+                row(km.field_next, "next text field"),
+                row(km.field_prev, "previous text field"),
+                { "Enter / Space / click", "activate the focused widget" }
+            ) },
+            { "Search", rows(
+                row(km.focus_results, "run the search / jump to the results tree"),
+                row(km.toggle_case, ("toggle %s  match case"):format(ic.case)),
+                row(km.toggle_whole_word, ("toggle %s  whole word"):format(ic.whole_word)),
+                row(km.toggle_regex, ("toggle %s  regular expression"):format(ic.regex)),
+                row(km.toggle_no_ignore,
+                    ("toggle %s  include git-ignored files (on by default)"):format(ic.no_ignore)),
+                row(km.toggle_hidden,
+                    ("toggle %s  include hidden files (on by default; .git never searched)"):format(ic.hidden)),
+                row(km.search_method, "switch live <-> on-demand search"),
+                { ("%s box"):format(ic.replace_mode), "show the replace row and jump to its input" }
+            ) },
+            { "Replace", rows(
+                row(km.toggle_preserve_case, ("toggle %s  preserve case"):format(ic.preserve_case)),
+                row(km.replace_all, ("Replace All  (%s box)"):format(ic.replace_all)),
+                { "y / n  ·  Enter / Esc", "answer the Replace All dialog" }
+            ) },
+            { "Results", rows(
                 { "j / k", "move between rows" },
                 { "Enter / click", "jump to the selected match" },
-                { "zc", "collapse all files — press again to expand" },
-            } },
-            { "General", {
-                { "?", "show/hide this help" },
-                { "q / Esc / <leader>fs", "close the panel" },
-            } },
+                row(km.collapse_all, "collapse all files — press again to expand")
+            ) },
+            { "General", rows(
+                row(km.help, "show/hide this help"),
+                row(km.close ~= false and km.close, "close the panel (Esc always closes)")
+            ) },
         }
     end
     local help_buf, help_win = nil, nil
@@ -1029,10 +1090,16 @@ function M.create(opts)
     -- maps on freshly visible components (c:map is idempotent).
     attach_panel_maps = function()
         for _, c in ipairs(renderer:get_focusable_components()) do
-            c:map("n", "?", function()
-                toggle_help(c.winid)
-            end, { noremap = true })
-            c:map("n", "zc", toggle_collapse_all, { noremap = true })
+            local k = bind("help")
+            if k then
+                c:map("n", k, function()
+                    toggle_help(c.winid)
+                end, { noremap = true })
+            end
+            k = bind("collapse_all")
+            if k then
+                c:map("n", k, toggle_collapse_all, { noremap = true })
+            end
             -- VS Code "focus search results": Enter off the Search field
             -- jumps to the results tree (j/k then Enter picks a match).
             -- Mount re-registers TextInput's own insert <CR> (a no-op at
@@ -1041,37 +1108,42 @@ function M.create(opts)
             -- re-attach at the bottom of create() guarantees (nui keymap.set
             -- overwrites the same mode+key).
             if c == ti_search then
-                -- Live mode: Enter = "focus results" (VS Code). On-demand
-                -- mode: Enter RUNS the pending search; the next Enter (no
-                -- changes since) jumps to the tree.
-                for _, m in ipairs({ "n", "i" }) do
-                    c:map(m, "<CR>", function()
-                        if search_method == "full" and (dirty or not last_res) then
-                            run_search()
-                        else
-                            focus_component(tree_comp)
-                        end
-                    end, { noremap = true })
+                k = bind("focus_results")
+                if k then
+                    -- Live mode: Enter = "focus results" (VS Code). On-demand
+                    -- mode: Enter RUNS the pending search; the next Enter (no
+                    -- changes since) jumps to the tree.
+                    for _, m in ipairs({ "n", "i" }) do
+                        c:map(m, k, function()
+                            if search_method == "full" and (dirty or not last_res) then
+                                run_search()
+                            else
+                                focus_component(tree_comp)
+                            end
+                        end, { noremap = true })
+                    end
                 end
             end
-            for _, m in ipairs({ "n", "i" }) do
-                c:map(m, "<A-j>", function()
-                    focus_component(input_step(c, 1))
-                end, { noremap = true })
-                c:map(m, "<A-k>", function()
-                    focus_component(input_step(c, -1))
-                end, { noremap = true })
-                -- h and l both switch columns: sidebar -> tree, tree -> last field
-                c:map(m, "<A-l>", function()
-                    focus_component(tree_comp)
-                end, { noremap = true })
-                c:map(m, "<A-h>", function()
+            -- Column/field hops (h and l both switch columns): each is
+            -- individually unbindable via keymap.
+            local nav = {
+                { bind("field_next"), function() focus_component(input_step(c, 1)) end },
+                { bind("field_prev"), function() focus_component(input_step(c, -1)) end },
+                { bind("to_tree"), function() focus_component(tree_comp) end },
+                { bind("to_field"), function()
                     if c == tree_comp then
                         focus_component(last_field)
                     else
                         focus_component(tree_comp)
                     end
-                end, { noremap = true })
+                end },
+            }
+            for _, m in ipairs({ "n", "i" }) do
+                for _, e in ipairs(nav) do
+                    if e[1] then
+                        c:map(m, e[1], e[2], { noremap = true })
+                    end
+                end
             end
         end
     end
@@ -1081,37 +1153,53 @@ function M.create(opts)
     if params.pattern ~= "" then
         run_search()
     end
-    -- n+i so the toggle closes from inside the (insert-mode) text inputs;
-    -- buffer-local maps win over the global <leader>fs opener while mounted.
-    renderer:add_mappings({
-        { mode = "n", key = "q", handler = close },
-        { mode = { "n", "i" }, key = "<leader>S", handler = close },
-        { mode = { "n", "i" }, key = "<leader>fs", handler = close },
-    })
-    -- Custom Tab/S-Tab ring (the renderer's built-in tree walk is disabled;
+    -- Close keys: <leader>-prefixed entries map n+i (the toggle must work
+    -- from inside a focused input; buffer-local maps win over the global
+    -- opener while mounted); bare keys map n only so typing is never stolen.
+    if keys.close ~= false then
+        local close_maps = {}
+        for _, k in ipairs(keys.close) do
+            table.insert(close_maps, {
+                mode = k:sub(1, 8) == "<leader>" and { "n", "i" } or "n",
+                key = k,
+                handler = close,
+            })
+        end
+        renderer:add_mappings(close_maps)
+    end
+    -- Custom panel ring (the renderer's built-in tree walk is disabled;
     -- see create_renderer above). add_mappings entries attach AFTER the
     -- defaults on every component's popup buffer, including row-2 widgets
     -- mounted later when the replace row is revealed.
-    renderer:add_mappings({
-        { mode = { "n", "i" }, key = "<Tab>", handler = function() panel_step(1) end },
-        { mode = { "n", "i" }, key = "<S-Tab>", handler = function() panel_step(-1) end },
-        -- fzf-lua grep<->live_grep parity: same switch, same key.
-        { mode = { "n", "i" }, key = "<C-g>", handler = function()
-            if search_method == "live" then
-                search_method = "full"
-                debounce_timer:stop()
-                engine.cancel()
-                if params.pattern ~= "" then
-                    status.text = "On-demand search — press Enter"
-                end
-            else
-                search_method = "live"
-                if dirty then
-                    run_search()
-                end
+    local function toggle_search_method()
+        if search_method == "live" then
+            search_method = "full"
+            debounce_timer:stop()
+            engine.cancel()
+            if params.pattern ~= "" then
+                status.text = "On-demand search — press Enter"
             end
-        end },
-    })
+        else
+            search_method = "live"
+            if dirty then
+                run_search()
+            end
+        end
+    end
+    local panel_maps = {}
+    for _, e in ipairs({
+        { bind("next_panel"), function() panel_step(1) end },
+        { bind("prev_panel"), function() panel_step(-1) end },
+        -- fzf-lua grep<->live_grep parity: same switch, same key.
+        { bind("search_method"), toggle_search_method },
+    }) do
+        if e[1] then
+            table.insert(panel_maps, { mode = { "n", "i" }, key = e[1], handler = e[2] })
+        end
+    end
+    if #panel_maps > 0 then
+        renderer:add_mappings(panel_maps)
+    end
     -- Re-attach the panel maps once the first mount has settled (the comment
     -- on the <CR> map above explains why a pre-mount registration is not
     -- enough); the 60ms idiom matches tb_mode's extra() re-attach.

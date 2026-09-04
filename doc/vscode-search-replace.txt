@@ -47,7 +47,8 @@ on <https://github.com/grapp-dev/nui-components.nvim>.
   - `zc` in the results tree collapses all files at once (press again to
     expand them all)
   - every glyph (tree chevrons and the `⇄` `⇉` `Aa` `ab` `.*` `I` `H` `AB`
-    boxes) is overridable via the `icons` table in |vscode-search-replace-setup()|
+    boxes) is overridable via the `icons` table, and every panel key via the
+    `keymap` table in |vscode-search-replace-setup()|
 
 ==============================================================================
 2. Requirements                              *vscode-search-replace-requirements*
@@ -93,6 +94,7 @@ recommended wiring.
         case = "Aa", whole_word = "ab", regex = ".*",
         no_ignore = "I", hidden = "H", preserve_case = "AB",
       },
+      keymap = { ... },  -- see |vscode-search-replace-keymap|
     })
 <
 
@@ -119,6 +121,29 @@ icons     *vscode-search-replace-icons*
     value warns via |notify| and keeps that key's default. The `?` help
     overlay describes boxes with your configured glyphs.
 
+keymap    *vscode-search-replace-keymap*
+    Panel keybindings; omitted keys keep the defaults, `false` unbinds.
+    Values are Neovim keycodes (`"<A-c>"`, `"zc"`, `"<leader>gs"`). A bad
+    value warns via |notify| and keeps that key's default. Valid keys and
+    their defaults:
+      next_panel `"<Tab>"` · prev_panel `"<S-Tab>"` · field_next `"<A-j>"`
+      field_prev `"<A-k>"` · to_tree `"<A-l>"` · to_field `"<A-h>"`
+      focus_results `"<CR>"` · toggle_case `"<A-c>"`
+      toggle_whole_word `"<A-w>"` · toggle_regex `"<A-r>"`
+      toggle_no_ignore `"<A-I>"` · toggle_hidden `"<A-H>"`
+      toggle_preserve_case `"<A-p>"` · replace_all `"<C-A-CR>"`
+      search_method `"<C-g>"` · collapse_all `"zc"` · help `"?"`
+      close `{ "q", "<leader>fs", "<leader>S" }` — also accepts a single
+      string or `false`; `<leader>`-prefixed entries work in insert mode
+      too, bare keys in normal mode only.
+    Not configurable (built into the UI): `<Esc>` close, `Enter`/`Space`
+    activation, tree `j`/`k`, and the Replace All dialog keys. The `?`
+    help overlay always shows your configured keys.
+
+    Example — change one hotkey, drop another: >lua
+      keymap = { toggle_case = "<C-c>", collapse_all = false }
+<
+
 ==============================================================================
 5. Usage                                              *vscode-search-replace-usage*
 
@@ -126,9 +151,11 @@ icons     *vscode-search-replace-icons*
     Open the search & replace float (whole project = cwd).
 
 Keys inside the float: ~
+    The keys below are the defaults; every one is configurable via
+    |vscode-search-replace-keymap|.
     Key             Action
     <Tab>/<S-Tab>   next / previous panel (focus order below)
-    <Esc>/<Esc>     close (first <Esc> leaves insert mode in a focused input)
+    <Esc>           close (first <Esc> leaves insert mode in a focused input)
     q / <leader>fs  close (normal mode; the opener key toggles it closed)
     <CR>            in the Search field: run the pending search (on-demand
                     mode) or jump to the results tree (live mode); otherwise
