@@ -28,7 +28,7 @@ UI with live results, inline diff previews, and ripgrep speed. Built on
 - 🔍 **live results** while you type, powered by ripgrep
 - 📈 **streamed on huge repos**: partial results paint during a 10–30 s scan,
   `Ctrl+G` switches to **on-demand** search where the scan starts only on `Enter`
-- ⌨️ **VS Code-style toggle boxes** — `⇄` replace mode · `Aa` match case · `ab` whole word · `.*` regex · plus fzf-style `I` (include git-ignored files) and `H` (include hidden files)
+- ⌨️ **VS Code-style toggle boxes** — `⇄` replace mode · `Aa` match case · `ab` whole word · `.*` regex · plus fzf-style `I` (include git-ignored files) and `H` (include hidden files) — both **lit by default**; the `.git` directory is never searched
 - 🪟 **search-only to start**; `Tab` off the search field lands on `⇄` — activating it reveals the replace row and focuses the replace field without ever resizing the search box; `Enter` in the search field jumps to the results tree
 - 🖱️ **mouse-friendly**: every box, field and button is clickable
 - ✅ **Replace All asks first** with a Yes/No dialog before touching any file
@@ -99,8 +99,8 @@ require("vscode-search-replace").setup({
     case = "Aa",
     whole_word = "ab",
     regex = ".*",
-    no_ignore = "I", -- search row box: include git-ignored files (Alt+i)
-    hidden = "H", -- search row box: include hidden files (Ctrl+h)
+    no_ignore = "I", -- search row box: include git-ignored files (Alt+I)
+    hidden = "H", -- search row box: include hidden files (Alt+H)
     preserve_case = "AB", -- replace row box: replacements adopt each match's case
 })
 ```
@@ -134,7 +134,8 @@ Troubleshooting: `:checkhealth vscode-search-replace`
 
 Every panel is reachable — `Tab`/`Shift+Tab` to walk, `Alt+j`/`Alt+k` to hop
 between text fields, `Enter`/`Space` or a mouse click to activate — and the
-`Alt` hotkeys work from wherever focus is. Press `?` inside the float to see
+`Alt` hotkeys work from wherever focus is — `Alt+I`/`Alt+H` are shifted
+codes (press Alt+Shift+i / Alt+Shift+h). Press `?` inside the float to see
 this list.
 
 | Keymap                | Mode  | Description                                      |
@@ -146,8 +147,8 @@ this list.
 | `Alt+c`               | n/i   | toggle `Aa` — match case                         |
 | `Alt+w`               | n/i   | toggle `ab` — match whole word                   |
 | `Alt+r`               | n/i   | toggle `.*` — regular expression                 |
-| `Alt+i`               | n/i   | toggle `I` — include git-ignored files           |
-| `Ctrl+h`              | n/i   | toggle `H` — include hidden files                |
+| `Alt+I`               | n/i   | toggle `I` — include git-ignored files (lit by default)  |
+| `Alt+H`               | n/i   | toggle `H` — include hidden files (lit by default; `.git` never searched) |
 | `Ctrl+g`              | n/i   | switch live ⇄ on-demand search                   |
 | `Alt+p`               | n/i   | toggle `AB` — preserve case (replace mode)       |
 | `Ctrl+Alt+Enter`      | n/i   | Replace All — asks Yes/No first                  |

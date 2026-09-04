@@ -27,8 +27,10 @@ on <https://github.com/grapp-dev/nui-components.nvim>.
     where the scan only starts on `<CR>` in the Search field
   - inline old/new diff preview per match, with `\1`–`\9` capture references
   - inline `Aa` case, `ab` whole-word, `.*` regex, `I` include-git-ignored
-    and `H` include-hidden toggles on the search row, plus a
-    Files-to-Include path/glob filter (hidden for current-file searches)
+    and `H` include-hidden toggles on the search row — the `I`/`H` scope
+    boxes are lit by default and the `.git` directory is never searched —
+    plus a Files-to-Include path/glob filter (hidden for current-file
+    searches)
   - the float opens search-only; `Tab` off the pattern field lands on the
     `⇄` box (left of the pattern field) and activating it (`Enter`/`Space`/
     click) reveals the replace row — replace field, `AB` preserve-case box
@@ -39,8 +41,8 @@ on <https://github.com/grapp-dev/nui-components.nvim>.
   - whole-project, current-file and word/visual-selection search variants
   - `<CR>` jumps to the match, `<M-C-CR>` (Ctrl+Alt+Enter) replaces
     everywhere after a Yes/No confirmation dialog
-  - `Alt+h/j/k/l` + `Tab` panel navigation and `Alt+c/w/r/i/p` plus `Ctrl+h`
-    hotkeyed toggles; the plugin ships no global keymaps
+  - `Alt+h/j/k/l` + `Tab` panel navigation and `Alt+c/w/r/p` plus shifted
+    `Alt+I`/`Alt+H` hotkeyed toggles; the plugin ships no global keymaps
   - `?` in normal mode shows the keymap help overlay
   - `zc` in the results tree collapses all files at once (press again to
     expand them all)
@@ -137,8 +139,10 @@ Keys inside the float: ~
     Alt+c           toggle `Aa` match case
     Alt+w           toggle `ab` whole word
     Alt+r           toggle `.*` regular expression
-    Alt+i           toggle `I` include git-ignored files (rg --no-ignore)
-    Ctrl+h          toggle `H` include hidden files (rg --hidden)
+    Alt+I           toggle `I` include git-ignored files (rg --no-ignore);
+                    lit by default — press Alt+Shift+i
+    Alt+H           toggle `H` include hidden files (rg --hidden); lit by
+                    default, `.git` never searched — press Alt+Shift+h
     Ctrl+g          switch live <-> on-demand search; switching back to
                     live re-runs immediately when results are stale
     Alt+p           toggle `AB` preserve case (replace mode only)
@@ -149,7 +153,8 @@ Keys inside the float: ~
     zc              collapse all files in the results tree; press again to
                     expand them all (normal mode, any panel)
 
-    The toggle boxes fill (reverse video) while their option is active.
+    The toggle boxes fill (reverse video) while their option is active; the
+    `I` and `H` scope boxes ship filled. Unshifted `Alt+h` is navigation.
     Focus order: Search -> `⇄` -> `Aa` -> `ab` -> `.*` -> `I` -> `H` ->
     Replace input -> `AB` -> `⇉` -> Files to Include -> results tree; hidden
     widgets leave the cycle while the Replace row is hidden. `Alt+j`/`Alt+k` skip the

@@ -58,6 +58,12 @@ function M.build_rg_cmd(params)
     if params.hidden then
         cmd[#cmd + 1] = "--hidden"
     end
+    -- The scope toggles make rg walk hidden/ignored trees; without this,
+    -- --hidden drags the whole .git object store into every search. A later
+    -- user glob naming .git still wins (rg gives precedence to the last
+    -- matching glob), and "dir/" only ever matches directories.
+    cmd[#cmd + 1] = "--glob"
+    cmd[#cmd + 1] = "!.git/"
     if params.include and params.include ~= "" then
         -- VS Code-style normalization: rg --glob matches RELATIVE to the
         -- walk root, so an absolute entry under the search root or a

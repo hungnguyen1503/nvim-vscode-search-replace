@@ -31,6 +31,16 @@ local function run_search(dir, o, sopts)
 end
 
 describe("engine.build_rg_cmd", function()
+  -- every user --glob value, skipping the built-in .git exclusion
+  local function user_globs(cmd)
+    local g = {}
+    for i = 1, #cmd - 1 do
+      if cmd[i] == "--glob" and cmd[i + 1] ~= "!.git/" then
+        g[#g + 1] = cmd[i + 1]
+      end
+    end
+    return g
+  end
   it("always passes machine flags and a -e/-- separator", function()
     local cmd = engine.build_rg_cmd(params({ pattern = "x", path = "/tmp/p" }))
     assert.are.same(
@@ -51,64 +61,70 @@ describe("engine.build_rg_cmd", function()
     local cmd = engine.build_rg_cmd(params({ whole_word = true, case_sensitive = false, pattern = "foo", path = "." }))
     assert.are.same(
       { "rg", "--json", "--no-heading", "--color", "never", "--line-number", "--no-messages",
-        "-i", "-F", "--word-regexp", "-e", "foo", "--", "." },
+        "-i", "-F", "--word-regexp", "--glob", "!.git/", "-e", "foo", "--", "." },
       cmd
     )
   end)
 
-  it("globs live before the pattern; plain paths get a /** companion", function()
+  it("the .git exclusion precedes user globs; plain paths get a /** companion", function()
     local cmd = engine.build_rg_cmd(params({ pattern = "x", path = ".", include = "src,*.lua," }))
     local gi
-    for i = 1, #cmd do
-      if cmd[i] == "--glob" then
+    for i = 1, #cmd - 1 do
+      if cmd[i] == "--glob" and cmd[i + 1] == "!.git/" then
         gi = i
         break
       end
     end
-    assert(gi, "no --glob in " .. table.concat(cmd, " "))
-    assert.are.same({ "--glob", "src", "--glob", "src/**", "--glob", "*.lua" }, { unpack(cmd, gi, gi + 5) })
+    assert(gi, "no .git exclusion in " .. table.concat(cmd, " "))
+    assert.are.same(
+      { "--glob", "!.git/", "--glob", "src", "--glob", "src/**", "--glob", "*.lua" },
+      { unpack(cmd, gi, gi + 7) }
+    )
+    -- exclusion lives inside the glob section, before -e
+    for i = 1, #cmd do
+      if cmd[i] == "-e" then
+        assert.is_true(gi < i, ".git glob after the pattern?")
+        break
+      end
+    end
   end)
 
-  it("adds --no-ignore / --hidden only when the toggles set them", function()
+  it("adds --no-ignore / --hidden only when the toggles set them; .git is always excluded", function()
     local has = function(cmd, flag) return vim.list_contains(cmd, flag) end
     local base = { pattern = "x", path = "." }
-    assert.is_false(has(engine.build_rg_cmd(params(base)), "--no-ignore"))
-    assert.is_false(has(engine.build_rg_cmd(params(base)), "--hidden"))
+    local off = engine.build_rg_cmd(params(base))
+    assert.is_false(has(off, "--no-ignore"))
+    assert.is_false(has(off, "--hidden"))
+    assert.is_true(has(off, "!.git/"))
     local on = vim.tbl_extend("force", base, { no_ignore = true, hidden = true })
-    assert.is_true(has(engine.build_rg_cmd(params(on)), "--no-ignore"))
-    assert.is_true(has(engine.build_rg_cmd(params(on)), "--hidden"))
+    local cmd = engine.build_rg_cmd(params(on))
+    assert.is_true(has(cmd, "--no-ignore"))
+    assert.is_true(has(cmd, "--hidden"))
+    assert.is_true(has(cmd, "!.git/"))
   end)
 
   it("normalizes an absolute include under the search root to relative globs", function()
     local cmd = engine.build_rg_cmd(
       params({ pattern = "x", path = "C:/repo/app", include = "C:/repo/app/src/mcu" })
     )
-    local g = {}
-    for i = 1, #cmd - 1 do
-      if cmd[i] == "--glob" then
-        g[#g + 1] = cmd[i + 1]
-      end
-    end
-    assert.are.same({ "src/mcu", "src/mcu/**", "**/src/mcu/**" }, g)
+    assert.are.same({ "src/mcu", "src/mcu/**", "**/src/mcu/**" }, user_globs(cmd))
   end)
 
   it("drops an include equal to the root and strips workspace-relative slashes on Windows", function()
     local root_only = engine.build_rg_cmd(
       params({ pattern = "x", path = "C:/repo/app/", include = "C:/repo/app" })
     )
-    for i = 1, #root_only do
-      assert.is_not_equal("--glob", root_only[i])
-    end
+    assert.are.same({ "!.git/" }, (function()
+      local g = {}
+      for i = 1, #root_only - 1 do
+        if root_only[i] == "--glob" then g[#g + 1] = root_only[i + 1] end
+      end
+      return g
+    end)())
     local ws_rel = engine.build_rg_cmd(
       params({ pattern = "x", path = "C:/repo/app", include = "/src" })
     )
-    local g = {}
-    for i = 1, #ws_rel - 1 do
-      if ws_rel[i] == "--glob" then
-        g[#g + 1] = ws_rel[i + 1]
-      end
-    end
-    assert.are.same({ "src", "src/**" }, g)
+    assert.are.same({ "src", "src/**" }, user_globs(ws_rel))
   end)
 end)
 

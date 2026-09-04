@@ -65,8 +65,8 @@ function M.create(opts)
         case_sensitive = false,
         whole_word = false,
         preserve_case = false,
-        no_ignore = false,
-        hidden = false,
+        no_ignore = true,
+        hidden = true,
         include = "",
         path = opts.path,
     }
@@ -78,8 +78,8 @@ function M.create(opts)
         whole = false,
         replace = false,
         preserve = false,
-        no_ignore = false,
-        hidden = false,
+        no_ignore = true,
+        hidden = true,
     })
     -- Fresh instance per consumer: :map mutates the SignalValue it is called on.
     local function hidden_unless_replace()
@@ -645,13 +645,15 @@ function M.create(opts)
     -- showing/hiding it would re-flow the flex row and resize the search box
     -- on every mode switch, which is exactly what a find widget must not do.
     local tb_whole = toggle_button("whole", "whole_word", icons.whole_word, "<A-w>", schedule)
-    -- fzf-lua parity toggles: I = include git-ignored files (--no-ignore),
-    -- H = include hidden files (--hidden). A LIT box means "these files are
-    -- in the search". Ctrl+I is unusable here (Neovim delivers it as Tab —
-    -- the panel's focus ring owns byte 9), so ignore rides Alt+I while
-    -- Alt+H stays sidebar navigation (user choice) and hidden takes Ctrl+H.
-    local tb_ignore = toggle_button("no_ignore", "no_ignore", icons.no_ignore, "<A-i>", schedule)
-    local tb_hidden = toggle_button("hidden", "hidden", icons.hidden, "<C-h>", schedule)
+    -- fzf-lua parity scope toggles, BOTH ON by default: I = also search
+    -- git-ignored files (--no-ignore), H = also hidden/dotfiles (--hidden;
+    -- the engine always excludes .git). A LIT box means "these files are in
+    -- the search". Both ride the shifted Alt chord: Neovim delivers
+    -- Alt+Shift+<letter> as <A-I>/<A-H> (measured under WezTerm CSI-u and
+    -- legacy ESC encodings), so they cannot collide with the <A-h> sidebar
+    -- navigation binding, and Ctrl+H stays terminal backspace.
+    local tb_ignore = toggle_button("no_ignore", "no_ignore", icons.no_ignore, "<A-I>", schedule)
+    local tb_hidden = toggle_button("hidden", "hidden", icons.hidden, "<A-H>", schedule)
     -- ⇄ sits LEFT of Search but is the FIRST TAB STOP after the search field
     -- (explicit panel ring — see panel_step): activating it reveals the
     -- replace ROW (Replace input · AB · ⇉) and jumps the cursor into the
@@ -697,6 +699,9 @@ function M.create(opts)
     local ti_include = n.text_input({
         border_label = "Files to Include",
         max_lines = 1,
+        -- flex=1: claim the whole (size=1) include row, same as the inputs
+        -- in the search/replace rows — otherwise the box collapses to 3x3.
+        flex = 1,
         placeholder = "lua/hls, lua/mappings",
         on_change = function(value)
             params.include = value
@@ -797,7 +802,7 @@ function M.create(opts)
         -- current-file search has no file set to narrow: an rg --glob filters
         -- even explicit FILE arguments (measured), so any leftover include
         -- text would silently zero the search — the field is hidden there.
-        n.columns({ flex = 1, hidden = opts.file_mode }, ti_include)
+        n.columns({ flex = 0, size = 1, hidden = opts.file_mode }, ti_include)
     )
 
     local status_par = n.paragraph({ lines = status.text, is_focusable = false, size = 1 })
@@ -909,7 +914,7 @@ function M.create(opts)
         return {
             { "Navigation", {
                 { "<Tab> / <S-Tab>", "next / previous panel" },
-                { "Alt+h / Alt+l", "sidebar <-> results tree" },
+                { "Alt+h / Alt+l", "sidebar <-> results tree (unshifted)" },
                 { "Alt+j / Alt+k", "previous / next text field" },
                 { "Enter / Space / click", "activate the focused widget" },
             } },
@@ -918,8 +923,8 @@ function M.create(opts)
                 { "Alt+C", ("toggle %s  match case"):format(ic.case) },
                 { "Alt+W", ("toggle %s  whole word"):format(ic.whole_word) },
                 { "Alt+R", ("toggle %s  regular expression"):format(ic.regex) },
-                { "Alt+I", ("toggle %s  include git-ignored files"):format(ic.no_ignore) },
-                { "Ctrl+H", ("toggle %s  include hidden files"):format(ic.hidden) },
+                { "Alt+I", ("toggle %s  include git-ignored files (on by default)"):format(ic.no_ignore) },
+                { "Alt+H", ("toggle %s  include hidden files (on by default; .git never searched)"):format(ic.hidden) },
                 { "Ctrl+G", "switch live <-> on-demand search" },
                 { ("%s box"):format(ic.replace_mode), "show the replace row and jump to its input" },
             } },
