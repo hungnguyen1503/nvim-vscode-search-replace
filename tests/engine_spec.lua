@@ -10,18 +10,21 @@ local function fixture(files)
   local dir = vim.fn.tempname()
   vim.fn.mkdir(dir, "p")
   for name, lines in pairs(files) do
-    vim.fn.writefile(lines, vim.fs.joinpath(dir, name), "b")
+    local p = vim.fs.joinpath(dir, name)
+    vim.fn.mkdir(vim.fn.fnamemodify(p, ":h"), "p")
+    vim.fn.writefile(lines, p, "b")
   end
   return dir
 end
 
-local function run_search(dir, o)
-  local res, done
+local function run_search(dir, o, sopts)
+  local res
   engine.search(params(vim.tbl_extend("force", { path = dir }, o)), function(r)
     res = r
-    done = true
-  end)
-  local ok = vim.wait(10000, function() return done end)
+  end, sopts)
+  -- on_done may fire repeatedly while streaming; the contract is that the
+  -- LAST call carries final=true.
+  local ok = vim.wait(10000, function() return res and res.final end)
   assert(ok, "search timed out")
   assert.is_nil(res.error)
   return res
@@ -30,7 +33,10 @@ end
 describe("engine.build_rg_cmd", function()
   it("always passes machine flags and a -e/-- separator", function()
     local cmd = engine.build_rg_cmd(params({ pattern = "x", path = "/tmp/p" }))
-    assert.are.same({ "rg", "--json", "--no-heading", "--color", "never", "--line-number" }, { unpack(cmd, 1, 6) })
+    assert.are.same(
+      { "rg", "--json", "--no-heading", "--color", "never", "--line-number", "--no-messages" },
+      { unpack(cmd, 1, 7) }
+    )
     assert.are.same({ "-e", "x", "--", "/tmp/p" }, { unpack(cmd, #cmd - 3) })
   end)
 
@@ -44,7 +50,8 @@ describe("engine.build_rg_cmd", function()
   it("adds --word-regexp after -F when whole_word is set", function()
     local cmd = engine.build_rg_cmd(params({ whole_word = true, case_sensitive = false, pattern = "foo", path = "." }))
     assert.are.same(
-      { "rg", "--json", "--no-heading", "--color", "never", "--line-number", "-i", "-F", "--word-regexp", "-e", "foo", "--", "." },
+      { "rg", "--json", "--no-heading", "--color", "never", "--line-number", "--no-messages",
+        "-i", "-F", "--word-regexp", "-e", "foo", "--", "." },
       cmd
     )
   end)
@@ -60,6 +67,48 @@ describe("engine.build_rg_cmd", function()
     end
     assert(gi, "no --glob in " .. table.concat(cmd, " "))
     assert.are.same({ "--glob", "src", "--glob", "src/**", "--glob", "*.lua" }, { unpack(cmd, gi, gi + 5) })
+  end)
+
+  it("adds --no-ignore / --hidden only when the toggles set them", function()
+    local has = function(cmd, flag) return vim.list_contains(cmd, flag) end
+    local base = { pattern = "x", path = "." }
+    assert.is_false(has(engine.build_rg_cmd(params(base)), "--no-ignore"))
+    assert.is_false(has(engine.build_rg_cmd(params(base)), "--hidden"))
+    local on = vim.tbl_extend("force", base, { no_ignore = true, hidden = true })
+    assert.is_true(has(engine.build_rg_cmd(params(on)), "--no-ignore"))
+    assert.is_true(has(engine.build_rg_cmd(params(on)), "--hidden"))
+  end)
+
+  it("normalizes an absolute include under the search root to relative globs", function()
+    local cmd = engine.build_rg_cmd(
+      params({ pattern = "x", path = "C:/repo/app", include = "C:/repo/app/src/mcu" })
+    )
+    local g = {}
+    for i = 1, #cmd - 1 do
+      if cmd[i] == "--glob" then
+        g[#g + 1] = cmd[i + 1]
+      end
+    end
+    assert.are.same({ "src/mcu", "src/mcu/**", "**/src/mcu/**" }, g)
+  end)
+
+  it("drops an include equal to the root and strips workspace-relative slashes on Windows", function()
+    local root_only = engine.build_rg_cmd(
+      params({ pattern = "x", path = "C:/repo/app/", include = "C:/repo/app" })
+    )
+    for i = 1, #root_only do
+      assert.is_not_equal("--glob", root_only[i])
+    end
+    local ws_rel = engine.build_rg_cmd(
+      params({ pattern = "x", path = "C:/repo/app", include = "/src" })
+    )
+    local g = {}
+    for i = 1, #ws_rel - 1 do
+      if ws_rel[i] == "--glob" then
+        g[#g + 1] = ws_rel[i + 1]
+      end
+    end
+    assert.are.same({ "src", "src/**" }, g)
   end)
 end)
 
@@ -252,6 +301,78 @@ if vim.fn.executable("rg") == 1 then
       local out = engine.apply(res, params(base))
       assert.are.equal(1, #out.written)
       assert.are.same({ "bar BAR Bar keep", "" }, vim.fn.readfile(vim.fs.joinpath(dir, "c.txt"), "b"))
+    end)
+
+    it("streams: intermediate deliveries carry final=false, the last one final=true", function()
+      local lines = {}
+      for i = 1, 3000 do
+        lines[i] = "line " .. i .. " needle"
+      end
+      local dir = fixture({ ["big.lua"] = lines })
+      local calls = {}
+      -- every delivery passes the SAME res table; snapshot primitives so the
+      -- per-call assertions observe the state at callback time.
+      engine.search(params({ path = dir, pattern = "needle" }), function(r)
+        calls[#calls + 1] = { final = r.final, total = r.total, searches = r.searches }
+      end, { max_stored = 5000 })
+      vim.wait(10000, function() return calls[#calls] and calls[#calls].final end)
+      local last = calls[#calls]
+      assert.is_true(last.final)
+      assert.are.equal(3000, last.total)
+      assert.is_true((last.searches or 0) >= 1)
+      local prev = 0
+      for i = 1, #calls - 1 do
+        assert.is_not_true(calls[i].final)
+        assert.is_true(calls[i].total >= prev)
+        prev = calls[i].total
+      end
+    end)
+
+    it("stops storing at opts.max_stored and flags the result truncated", function()
+      local lines = {}
+      for i = 1, 4000 do
+        lines[i] = "needle " .. i
+      end
+      local dir = fixture({ ["cap.txt"] = lines })
+      local res = run_search(dir, { pattern = "needle" }, { max_stored = 250 })
+      assert.is_true(res.truncated)
+      assert.are.equal(250, res.total)
+      local stored = 0
+      for _, f in ipairs(res.files) do
+        stored = stored + #f.matches
+      end
+      assert.are.equal(250, stored)
+    end)
+
+    it("an absolute include entry filters to that subtree end-to-end", function()
+      local dir = fixture({
+        ["root.txt"] = { "needle", "" },
+        ["sub/in.txt"] = { "needle", "" },
+      })
+      local res = run_search(dir, { pattern = "needle", include = dir .. "/sub" })
+      assert.are.equal(1, res.total)
+      assert.matches("in.txt$", res.files[1].path)
+    end)
+
+    it("exposes searches so the UI can flag an include typo vs a real zero", function()
+      local dir = fixture({ ["only.lua"] = { "needle", "" } })
+      local res = run_search(dir, { pattern = "needle", include = "*.nomatch" })
+      assert.are.equal(0, res.total)
+      assert.are.equal(0, res.searches)
+    end)
+
+    it("opts.stream = false delivers exactly one final, fully-stored result", function()
+      local dir = fixture({ ["s.lua"] = { "needle a", "needle b", "" } })
+      local calls, res = 0, nil
+      engine.search(params({ path = dir, pattern = "needle" }), function(r)
+        calls = calls + 1
+        res = r
+      end, { stream = false })
+      vim.wait(10000, function() return res and res.final end)
+      assert.are.equal(1, calls)
+      assert.are.equal(2, res.total)
+      assert.are.equal(1, #res.files)
+      assert.are.equal(2, #res.files[1].matches)
     end)
   end)
 end

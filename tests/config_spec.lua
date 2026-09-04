@@ -51,6 +51,11 @@ describe("config", function()
     end
   end)
 
+  it("defaults the fzf-lua toggle icons to I and H", function()
+    assert.same("I", config.get().icons.no_ignore)
+    assert.same("H", config.get().icons.hidden)
+  end)
+
   it("has documented icon defaults", function()
     local icons = config.get().icons
     assert.same("Aa", icons.case)

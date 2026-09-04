@@ -22,10 +22,13 @@ Neovim: a floating two-column UI with live debounced ripgrep results, inline
 red/green diff previews for every match, and a byte-exact Replace All. Built
 on <https://github.com/grapp-dev/nui-components.nvim>.
 
-  - live results while you type (ripgrep, debounced)
+  - live results while you type (ripgrep, debounced); on huge repos partial
+    results paint during the scan, and `Ctrl+g` switches to on-demand search
+    where the scan only starts on `<CR>` in the Search field
   - inline old/new diff preview per match, with `\1`–`\9` capture references
-  - inline `Aa` case, `ab` whole-word and `.*` regex toggles on the search
-    row, plus a Files-to-Include path/glob filter
+  - inline `Aa` case, `ab` whole-word, `.*` regex, `I` include-git-ignored
+    and `H` include-hidden toggles on the search row, plus a
+    Files-to-Include path/glob filter (hidden for current-file searches)
   - the float opens search-only; `Tab` off the pattern field lands on the
     `⇄` box (left of the pattern field) and activating it (`Enter`/`Space`/
     click) reveals the replace row — replace field, `AB` preserve-case box
@@ -36,12 +39,12 @@ on <https://github.com/grapp-dev/nui-components.nvim>.
   - whole-project, current-file and word/visual-selection search variants
   - `<CR>` jumps to the match, `<M-C-CR>` (Ctrl+Alt+Enter) replaces
     everywhere after a Yes/No confirmation dialog
-  - `Alt+h/j/k/l` + `Tab` panel navigation and `Alt+c/w/r/p` hotkeyed
-    toggles; the plugin ships no global keymaps
+  - `Alt+h/j/k/l` + `Tab` panel navigation and `Alt+c/w/r/i/p` plus `Ctrl+h`
+    hotkeyed toggles; the plugin ships no global keymaps
   - `?` in normal mode shows the keymap help overlay
   - `zc` in the results tree collapses all files at once (press again to
     expand them all)
-  - every glyph (tree chevrons and the `⇄` `⇉` `Aa` `ab` `.*` `AB`
+  - every glyph (tree chevrons and the `⇄` `⇉` `Aa` `ab` `.*` `I` `H` `AB`
     boxes) is overridable via the `icons` table in |vscode-search-replace-setup()|
 
 ==============================================================================
@@ -86,7 +89,7 @@ recommended wiring.
         tree_expanded = "\u{F107}", tree_collapsed = "\u{F105}",
         replace_mode = "⇄", replace_all = "⇉",
         case = "Aa", whole_word = "ab", regex = ".*",
-        preserve_case = "AB",
+        no_ignore = "I", hidden = "H", preserve_case = "AB",
       },
     })
 <
@@ -108,7 +111,8 @@ debounce *vscode-search-replace-debounce*
 icons     *vscode-search-replace-icons*
     Table of glyphs used by the UI; omitted keys keep the defaults above.
     Valid keys: `tree_expanded`, `tree_collapsed`, `replace_mode`,
-    `replace_all`, `case`, `whole_word`, `regex`, `preserve_case`.
+    `replace_all`, `case`, `whole_word`, `regex`, `no_ignore`, `hidden`,
+    `preserve_case`.
     Values must be strings (an empty string hides a glyph); a non-string
     value warns via |notify| and keeps that key's default. The `?` help
     overlay describes boxes with your configured glyphs.
@@ -124,7 +128,8 @@ Keys inside the float: ~
     <Tab>/<S-Tab>   next / previous panel (focus order below)
     <Esc>/<Esc>     close (first <Esc> leaves insert mode in a focused input)
     q / <leader>fs  close (normal mode; the opener key toggles it closed)
-    <CR>            jump from the Search field to the results tree; otherwise
+    <CR>            in the Search field: run the pending search (on-demand
+                    mode) or jump to the results tree (live mode); otherwise
                     activate the focused widget · jump to the selected match
     click           same as <CR>/Space on boxes and fields; focuses inputs
     <M-C-CR>        Replace All (Ctrl+Alt+Enter) — opens a Yes/No
@@ -132,6 +137,10 @@ Keys inside the float: ~
     Alt+c           toggle `Aa` match case
     Alt+w           toggle `ab` whole word
     Alt+r           toggle `.*` regular expression
+    Alt+i           toggle `I` include git-ignored files (rg --no-ignore)
+    Ctrl+h          toggle `H` include hidden files (rg --hidden)
+    Ctrl+g          switch live <-> on-demand search; switching back to
+                    live re-runs immediately when results are stale
     Alt+p           toggle `AB` preserve case (replace mode only)
     Alt+h/Alt+l     move to the previous/next panel column
     Alt+j/Alt+k     hop to the next/previous text field (Search ·
@@ -141,9 +150,9 @@ Keys inside the float: ~
                     expand them all (normal mode, any panel)
 
     The toggle boxes fill (reverse video) while their option is active.
-    Focus order: Search -> `⇄` -> `Aa` -> `ab` -> `.*` -> Replace input ->
-    `AB` -> `⇉` -> Files to Include -> results tree; hidden widgets leave
-    the cycle while the Replace row is hidden. `Alt+j`/`Alt+k` skip the
+    Focus order: Search -> `⇄` -> `Aa` -> `ab` -> `.*` -> `I` -> `H` ->
+    Replace input -> `AB` -> `⇉` -> Files to Include -> results tree; hidden
+    widgets leave the cycle while the Replace row is hidden. `Alt+j`/`Alt+k` skip the
     boxes and hop directly between the three text fields. Pressing `⇄`
     (`Enter`/`Space`/click) shows the row and moves the cursor into the
     replace field; pressing again hides it — and hides `AB` with it. The

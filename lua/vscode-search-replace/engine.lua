@@ -10,10 +10,16 @@
 --   preserve_case   = boolean,  -- adapt the replacement to each match's casing
 --   include         = string,   -- comma-separated paths/globs; "" = all
 --   path            = string,   -- absolute search root (cwd at open)
+--   no_ignore       = boolean,  -- include gitignored files (--no-ignore)
+--   hidden          = boolean,  -- include hidden files (--hidden)
 
 local M = {}
 
-local MAX_STORED = 1000
+local MAX_STORED = 1000 -- default per-search storage cap (opts.max_stored)
+
+-- Throttle for streamed partial deliveries (ms): a hot pattern updates the
+-- UI about five times a second instead of once per output chunk.
+local DELIVER_MS = 200
 
 -- Latest search token: stale vim.system callbacks are ignored once a newer
 -- search has been requested (debounced live search races).
@@ -36,7 +42,7 @@ end
 ---@param params table
 ---@return string[]
 function M.build_rg_cmd(params)
-    local cmd = { "rg", "--json", "--no-heading", "--color", "never", "--line-number" }
+    local cmd = { "rg", "--json", "--no-heading", "--color", "never", "--line-number", "--no-messages" }
     if not params.case_sensitive then
         cmd[#cmd + 1] = "-i"
     end
@@ -46,21 +52,50 @@ function M.build_rg_cmd(params)
     if params.whole_word then
         cmd[#cmd + 1] = "--word-regexp"
     end
+    if params.no_ignore then
+        cmd[#cmd + 1] = "--no-ignore"
+    end
+    if params.hidden then
+        cmd[#cmd + 1] = "--hidden"
+    end
     if params.include and params.include ~= "" then
+        -- VS Code-style normalization: rg --glob matches RELATIVE to the
+        -- walk root, so an absolute entry under the search root or a
+        -- "/workspace-relative" one is converted before it silently matches
+        -- nothing (measured: pasted absolute paths gave searches=0).
+        local root = strip_trailing_slash(norm_slashes(params.path or "")):lower()
         for part in (params.include .. ","):gmatch("([^,]*)") do
             local entry = vim.trim(norm_slashes(part))
             entry = strip_trailing_slash(entry)
             if entry ~= "" then
-                -- A real glob (contains * ? [ or !) is passed once; a plain
-                -- path needs its own "/**" companion so rg recurses into it.
-                if entry:find("[%*%?%[%!]") then
-                    cmd[#cmd + 1] = "--glob"
-                    cmd[#cmd + 1] = entry
-                else
-                    cmd[#cmd + 1] = "--glob"
-                    cmd[#cmd + 1] = entry
-                    cmd[#cmd + 1] = "--glob"
-                    cmd[#cmd + 1] = entry .. "/**"
+                local low = entry:lower()
+                if root ~= "" and low == root then
+                    entry = nil -- the entry IS the root: already covered
+                elseif root ~= "" and low:sub(1, #root + 1) == root .. "/" then
+                    entry = entry:sub(#root + 2)
+                elseif entry:sub(1, 1) == "/" and root:sub(1, 1) ~= "/" then
+                    -- "/src" on Windows reads as workspace-relative; on
+                    -- POSIX it is a genuine absolute path: pass through.
+                    entry = entry:sub(2)
+                end
+                if entry and entry ~= "" then
+                    -- A real glob (contains * ? [ or !) is passed once; a plain
+                    -- path needs its own "/**" companion so rg recurses into it.
+                    if entry:find("[%*%?%[%!]") then
+                        cmd[#cmd + 1] = "--glob"
+                        cmd[#cmd + 1] = entry
+                    else
+                        cmd[#cmd + 1] = "--glob"
+                        cmd[#cmd + 1] = entry
+                        cmd[#cmd + 1] = "--glob"
+                        cmd[#cmd + 1] = entry .. "/**"
+                        if entry:find("/") then
+                            -- "src/mcu" below the walk root (nested folders)
+                            -- should still match, VS Code style.
+                            cmd[#cmd + 1] = "--glob"
+                            cmd[#cmd + 1] = "**/" .. entry .. "/**"
+                        end
+                    end
                 end
             end
         end
@@ -232,10 +267,25 @@ function M.substitute_line(line, params)
     return result
 end
 
---- Run an async ripgrep search.
+--- Run an async ripgrep search, streaming results as rg emits them.
+--- on_done MAY BE CALLED MULTIPLE TIMES: partial deliveries carry
+--- res.final == false (throttled to ~one per DELIVER_MS while matches land),
+--- then exactly one final delivery carries res.final == true (also for the
+--- empty-pattern short-circuit and for errors).
+--- opts:
+---   max_stored -- storage cap (default MAX_STORED). Once reached rg is
+---                killed early and res.truncated set: hot patterns neither
+---                flood the UI nor freeze the parse. Replace All recounts
+---                with a larger cap.
+---   stream     -- false disables partial deliveries (count-only runs).
 ---@param params table
 ---@param on_done fun(res: table)
-function M.search(params, on_done)
+---@param opts? table
+function M.search(params, on_done, opts)
+    opts = opts or {}
+    local cap = opts.max_stored or MAX_STORED
+    local do_stream = opts.stream ~= false
+
     -- Bump the token even on the synchronous paths so a still-running
     -- previous rg cannot deliver stale results afterwards.
     req_token = req_token + 1
@@ -246,7 +296,7 @@ function M.search(params, on_done)
             end)
             sys_handle = nil
         end
-        on_done({ files = {}, total = 0, ms = 0 })
+        on_done({ files = {}, total = 0, ms = 0, final = true })
         return
     end
     local token = req_token
@@ -261,84 +311,204 @@ function M.search(params, on_done)
     local t0 = vim.uv.now()
     local root = strip_trailing_slash(norm_slashes(params.path))
 
-    sys_handle = vim.system(cmd, { text = false }, function(out)
+    -- Run rg from the search root so relative --glob entries anchor there
+    -- deterministically, whatever Neovim's own cwd happens to be.
+    local st = params.path and vim.uv.fs_stat(params.path) or nil
+    local sys_cwd = (st and st.type == "directory") and params.path
+        or (params.path:match("^(.*)[/\\][^/\\]+$"))
+
+    local res = { files = {}, total = 0, ms = 0 }
+    local by_path = {}
+    local killed_for_cap = false
+
+    -- One decoded rg "match" event -> stored row. The body mirrors the old
+    -- batch parser exactly (byte-offset conversions, preview rules).
+    local function store(d)
+        local data = d.data
+        if not data then
+            return false
+        end
+        if res.total >= cap then
+            -- Cap reached: stop storing/counting (total stays at the cap,
+            -- which the UI words as "cap+") and make rg stop, too. The exit
+            -- callback still delivers this truncated final result.
+            res.truncated = true
+            if not killed_for_cap then
+                killed_for_cap = true
+                if sys_handle then
+                    pcall(function()
+                        sys_handle:kill("sigterm")
+                    end)
+                end
+            end
+            return false
+        end
+        res.total = res.total + 1
+        local raw = norm_slashes((data.path and data.path.text) or "")
+        local abs = is_absolute(raw) and raw or (root .. "/" .. raw)
+        local lines = data.lines or {}
+        -- rg includes the line terminator in lines.text/bytes
+        local text = lines.text
+            or (lines.bytes and vim.base64.decode(lines.bytes))
+            or ""
+        text = text:gsub("[\r\n]+$", "")
+        local sm = data.submatches and data.submatches[1]
+        local m = {
+            lnum = data.line_number,
+            text = text,
+            -- 1-based inclusive start, exclusive end (byte
+            -- offsets from rg, which are 0-based):
+            start = sm and (sm.start + 1) or nil,
+            ["end"] = sm and (sm["end"] + 1) or nil,
+        }
+        if params.replacement ~= nil and params.replacement ~= "" then
+            local new = M.substitute_line(text, params)
+            if new ~= text then
+                m.new = new
+            end
+        end
+        local f = by_path[abs]
+        if not f then
+            local rel = abs
+            if abs:sub(1, #root) == root then
+                rel = abs:sub(#root + 2)
+                -- search root IS the file (current-file mode): no suffix
+                if rel == "" then
+                    rel = abs:match("[^/]+$")
+                end
+            end
+            f = { path = abs, rel = rel, matches = {} }
+            by_path[abs] = f
+            table.insert(res.files, f)
+        end
+        table.insert(f.matches, m)
+        return true
+    end
+    -- Prefilter on the RAW line first (rg always emits "type" first): the
+    -- bulk of a hot pattern's output then costs one substring test per line
+    -- instead of a JSON decode. Returns true when a match was stored.
+    local function handle_line(line)
+        if line:find('"type":"match"', 1, true) then
+            if res.truncated then
+                return false
+            end
+            local ok, d = pcall(vim.json.decode, line)
+            if ok and type(d) == "table" and d.type == "match" then
+                return store(d)
+            end
+            return false
+        end
+        if not res.truncated and line:find('"type":"summary"', 1, true) then
+            local ok, d = pcall(vim.json.decode, line)
+            if ok and type(d) == "table" and d.data and d.data.stats then
+                res.searches = d.data.stats.searches
+            end
+        end
+        return false
+    end
+
+    -- The vim.system reader runs in a FAST-EVENT context where vim.fn — e.g.
+    -- substitute() via store() — is not allowed (empirically verified on
+    -- Nvim 0.12.4): chunks are line-buffered here and parsed by a scheduled
+    -- drain on the main loop instead.
+    local buf = ""
+    local queue = {}
+    local drain_pending = false
+    local last_deliver = t0
+    local deliver_pending = false
+
+    local function deliver()
+        deliver_pending = false
+        if token ~= req_token or res.final or not do_stream then
+            return
+        end
+        last_deliver = vim.uv.now()
+        res.ms = last_deliver - t0
+        res.final = false
+        on_done(res)
+    end
+
+    local function drain()
+        drain_pending = false
+        if token ~= req_token then
+            return
+        end
+        local found = false
+        for i = 1, #queue do
+            if handle_line(queue[i]) then
+                found = true
+            end
+        end
+        queue = {}
+        if not found or not do_stream then
+            return
+        end
+        local wait = DELIVER_MS - (vim.uv.now() - last_deliver)
+        if wait <= 0 then
+            deliver()
+        elseif not deliver_pending then
+            deliver_pending = true
+            vim.defer_fn(deliver, wait)
+        end
+    end
+
+    sys_handle = vim.system(cmd, {
+        text = false,
+        cwd = sys_cwd,
+        stdout = function(_, chunk)
+            if token ~= req_token or not chunk then
+                return
+            end
+            buf = buf .. chunk
+            local nl = buf:find("\n", 1, true)
+            while nl do
+                local line = buf:sub(1, nl - 1)
+                buf = buf:sub(nl + 1)
+                if line ~= "" then
+                    queue[#queue + 1] = line:gsub("\r$", "")
+                end
+                nl = buf:find("\n", 1, true)
+            end
+            if #queue > 0 and not drain_pending then
+                drain_pending = true
+                vim.schedule(drain)
+            end
+        end,
+    }, function(out)
         if token ~= req_token then
             return -- a newer search superseded this one
         end
         sys_handle = nil
-        -- vim.system callbacks run in a fast-event context where vim.fn
-        -- (substitute(), readfile(), the UI redraws in on_done, ...) are not
-        -- allowed; defer processing to the next main-loop iteration.
+        -- Fast-event context again: the final parse/delivery is deferred to
+        -- the next main-loop iteration.
         vim.schedule(function()
             if token ~= req_token then
                 return
             end
-            local res = { files = {}, total = 0, ms = vim.uv.now() - t0 }
-
-            -- rg exit codes: 0 = matches, 1 = no matches (NOT an error), >=2 = error.
-            if (out.code or 0) >= 2 then
+            -- rg exit codes: 0 = matches, 1 = no matches (NOT an error),
+            -- >=2 = error. A cap-triggered SIGTERM exit is a normal end.
+            if (out.code or 0) >= 2 and not killed_for_cap then
                 local err = (out.stderr or ""):match("[^\r\n]+")
                 res.error = err or ("rg exit code " .. tostring(out.code))
+                res.ms = vim.uv.now() - t0
+                res.final = true
                 on_done(res)
                 return
             end
-
-            local by_path = {}
-            local stdout = out.stdout or ""
-            for _, raw_line in ipairs(vim.split(stdout, "\n", true)) do
-                local line = raw_line:gsub("\r$", "")
-                if line ~= "" then
-                    local ok, d = pcall(vim.json.decode, line)
-                    if ok and type(d) == "table" and d.type == "match" then
-                        local data = d.data
-                        if data then
-                            res.total = res.total + 1
-                            if res.total <= MAX_STORED then
-                                local raw = norm_slashes((data.path and data.path.text) or "")
-                                local abs = is_absolute(raw) and raw or (root .. "/" .. raw)
-                                local lines = data.lines or {}
-                                -- rg includes the line terminator in lines.text/bytes
-                                local text = lines.text
-                                    or (lines.bytes and vim.base64.decode(lines.bytes))
-                                    or ""
-                                text = text:gsub("[\r\n]+$", "")
-                                local sm = data.submatches and data.submatches[1]
-                                local m = {
-                                    lnum = data.line_number,
-                                    text = text,
-                                    -- 1-based inclusive start, exclusive end (byte
-                                    -- offsets from rg, which are 0-based):
-                                    start = sm and (sm.start + 1) or nil,
-                                    ["end"] = sm and (sm["end"] + 1) or nil,
-                                }
-                                if params.replacement ~= nil and params.replacement ~= "" then
-                                    local new = M.substitute_line(text, params)
-                                    if new ~= text then
-                                        m.new = new
-                                    end
-                                end
-                                local f = by_path[abs]
-                                if not f then
-                                    local rel = abs
-                                    if abs:sub(1, #root) == root then
-                                        rel = abs:sub(#root + 2)
-                                        -- search root IS the file (current-file mode): no suffix
-                                        if rel == "" then
-                                            rel = abs:match("[^/]+$")
-                                        end
-                                    end
-                                    f = { path = abs, rel = rel, matches = {} }
-                                    by_path[abs] = f
-                                    table.insert(res.files, f)
-                                end
-                                table.insert(f.matches, m)
-                            else
-                                res.truncated = true
-                            end
-                        end
-                    end
-                end
+            -- Drain the tail: all stdout callbacks complete before the exit
+            -- callback runs (verified on Nvim 0.12.4), so queue + possible
+            -- unterminated last line is the complete data.
+            if buf ~= "" then
+                queue[#queue + 1] = buf:gsub("\r$", "")
+                buf = ""
             end
+            for i = 1, #queue do
+                handle_line(queue[i])
+            end
+            queue = {}
+            deliver_pending = false
+            res.ms = vim.uv.now() - t0
+            res.final = true
             on_done(res)
         end)
     end)

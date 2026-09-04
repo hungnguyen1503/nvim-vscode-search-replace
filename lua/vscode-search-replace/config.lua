@@ -15,6 +15,8 @@ local M = {}
 ---@field case? string           -- Aa box
 ---@field whole_word? string     -- ab box
 ---@field regex? string          -- .* box
+---@field no_ignore? string      -- I box (include git-ignored files, Alt+I)
+---@field hidden? string         -- H box (include hidden files, Ctrl+H)
 ---@field preserve_case? string  -- AB box
 local defaults = {
     position = "center",
@@ -29,6 +31,8 @@ local defaults = {
         case = "Aa",
         whole_word = "ab",
         regex = ".*",
+        no_ignore = "I",
+        hidden = "H",
         preserve_case = "AB",
     },
 }

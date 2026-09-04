@@ -18,7 +18,7 @@ UI with live results, inline diff previews, and ripgrep speed. Built on
   </tr>
   <tr>
     <td align="center">
-      <img src="img/preview.png" alt="The Search and Replace float in replace mode: the ⇄ toggle box left of the fixed-width pattern field, then Aa, ab and .* boxes — active toggles filled — plus the Replace field with the AB preserve-case and ⇉ Replace All icon boxes, the Files-to-Include filter and a ripgrep results tree showing every match and its old/new line" width="88%">
+      <img src="img/preview.png" alt="The Search and Replace float in replace mode: the ⇄ toggle box left of the fixed-width pattern field, then Aa, ab, .*, I and H boxes — active toggles filled — plus the Replace field with the AB preserve-case and ⇉ Replace All icon boxes, the Files-to-Include filter and a ripgrep results tree showing every match and its old/new line" width="88%">
     </td>
   </tr>
 </table>
@@ -26,8 +26,9 @@ UI with live results, inline diff previews, and ripgrep speed. Built on
 ## ✨ Features
 
 - 🔍 **live results** while you type, powered by ripgrep
-- 🎨 **inline diff preview** per match, with `\1`–`\9` capture references
-- ⌨️ **VS Code-style toggle boxes** — `⇄` replace mode · `Aa` match case · `ab` whole word · `.*` regex
+- 📈 **streamed on huge repos**: partial results paint during a 10–30 s scan,
+  `Ctrl+G` switches to **on-demand** search where the scan starts only on `Enter`
+- ⌨️ **VS Code-style toggle boxes** — `⇄` replace mode · `Aa` match case · `ab` whole word · `.*` regex · plus fzf-style `I` (include git-ignored files) and `H` (include hidden files)
 - 🪟 **search-only to start**; `Tab` off the search field lands on `⇄` — activating it reveals the replace row and focuses the replace field without ever resizing the search box; `Enter` in the search field jumps to the results tree
 - 🖱️ **mouse-friendly**: every box, field and button is clickable
 - ✅ **Replace All asks first** with a Yes/No dialog before touching any file
@@ -98,6 +99,8 @@ require("vscode-search-replace").setup({
     case = "Aa",
     whole_word = "ab",
     regex = ".*",
+    no_ignore = "I", -- search row box: include git-ignored files (Alt+i)
+    hidden = "H", -- search row box: include hidden files (Ctrl+h)
     preserve_case = "AB", -- replace row box: replacements adopt each match's case
 })
 ```
@@ -121,7 +124,8 @@ The float opens in search-only mode. `Tab` from the search field stops on the
 replace field with the `AB` and `⇉` boxes at its right — and drops the cursor
 into the replace field. From there `Tab` keeps walking in visual order
 (`AB` → `⇉` → Files to Include → results tree), and `Enter` in the search
-field jumps straight to the results tree. `Alt+j`/`Alt+k` hop directly
+field runs the pending search (on-demand mode) or jumps straight to the
+results tree (live mode). `Alt+j`/`Alt+k` hop directly
 between the three text fields (Search · Replace · Files to Include).
 
 Troubleshooting: `:checkhealth vscode-search-replace`
@@ -138,10 +142,13 @@ this list.
 | `<Tab>` / `<S-Tab>`   | n/i   | next / previous panel                            |
 | `Alt+j` / `Alt+k`         | n/i   | next / previous text field (Search · Replace · Files to Include) |
 | `Alt+h` / `Alt+l`     | n/i   | sidebar ⇄ results tree                           |
-| `Enter` / `Space` / click | n/i | in Search: jump to results tree · else activate focused widget · jump to selected match |
+| `Enter` / `Space` / click | n/i | in Search: run search (on-demand) or jump to results tree · else activate focused widget · jump to selected match |
 | `Alt+c`               | n/i   | toggle `Aa` — match case                         |
 | `Alt+w`               | n/i   | toggle `ab` — match whole word                   |
 | `Alt+r`               | n/i   | toggle `.*` — regular expression                 |
+| `Alt+i`               | n/i   | toggle `I` — include git-ignored files           |
+| `Ctrl+h`              | n/i   | toggle `H` — include hidden files                |
+| `Ctrl+g`              | n/i   | switch live ⇄ on-demand search                   |
 | `Alt+p`               | n/i   | toggle `AB` — preserve case (replace mode)       |
 | `Ctrl+Alt+Enter`      | n/i   | Replace All — asks Yes/No first                  |
 | `y` / `n` · `Enter` / `Esc` | n | answer the Replace All dialog (or click `Yes`/`No`) |

@@ -65,12 +65,22 @@ function M.create(opts)
         case_sensitive = false,
         whole_word = false,
         preserve_case = false,
+        no_ignore = false,
+        hidden = false,
         include = "",
         path = opts.path,
     }
     -- the toggle FILL repaints through reactive props: an `is_active =
     -- <SignalValue>` prop re-renders the button whenever the field is written.
-    local toggles = n.create_signal({ case = false, regex = false, whole = false, replace = false, preserve = false })
+    local toggles = n.create_signal({
+        case = false,
+        regex = false,
+        whole = false,
+        replace = false,
+        preserve = false,
+        no_ignore = false,
+        hidden = false,
+    })
     -- Fresh instance per consumer: :map mutates the SignalValue it is called on.
     local function hidden_unless_replace()
         return toggles.replace:dup():map(function(v)
@@ -79,6 +89,12 @@ function M.create(opts)
     end
     local tree_data = {}
     local last_res = nil
+    -- Search method (fzf-lua grep<->live_grep parity): "live" re-searches on
+    -- every keystroke (debounced), "full" waits for Enter in the Search
+    -- field; Ctrl+G toggles. dirty marks params changed since the last
+    -- FINAL delivery — Enter in full mode then runs, else jumps to tree.
+    local search_method = "live"
+    local dirty = false
     local close, schedule, run_search, render_results
     local tree_comp
     local attach_panel_maps
@@ -261,21 +277,48 @@ function M.create(opts)
             status.text = "Nothing to replace"
             return
         end
-        local prompt = ("Replace %d matches in %d files?"):format(last_res.total, #last_res.files)
-        open_confirm(prompt, function()
-            local r = engine.apply(last_res, params)
-            local skipped = {}
-            for _, f in ipairs(r.failed or {}) do
-                table.insert(skipped, f.path .. " (" .. f.reason .. ")")
-            end
-            vim.notify(
-                ("vscode-search-replace: replaced in %d file(s)%s"):format(
-                    #(r.written or {}),
-                    #skipped > 0 and ("; skipped: " .. table.concat(skipped, ", ")) or ""
+        local function confirm_and_apply(res)
+            local prompt = ("Replace %d matches in %d files?"):format(res.total, #res.files)
+            open_confirm(prompt, function()
+                local r = engine.apply(res, params)
+                local skipped = {}
+                for _, f in ipairs(r.failed or {}) do
+                    table.insert(skipped, f.path .. " (" .. f.reason .. ")")
+                end
+                vim.notify(
+                    ("vscode-search-replace: replaced in %d file(s)%s"):format(
+                        #(r.written or {}),
+                        #skipped > 0 and ("; skipped: " .. table.concat(skipped, ", ")) or ""
+                    )
                 )
-            )
-            run_search()
-        end)
+                run_search()
+            end)
+        end
+        if last_res.truncated then
+            -- The streamed search stopped storing at the display cap, so
+            -- last_res holds only its first slice. Recount with a raised
+            -- storage budget (no partial deliveries) and apply THAT; refuse
+            -- when even the recount hits its cap, instead of silently
+            -- replacing a subset.
+            status.text = "Counting all matches…"
+            engine.search(params, function(res)
+                if closed or not res.final then
+                    return
+                end
+                if res.truncated then
+                    status.text = "Too many matches to replace safely"
+                    vim.notify(
+                        "vscode-search-replace: too many matches to replace safely (limit 50000)",
+                        vim.log.levels.ERROR
+                    )
+                    return
+                end
+                last_res = res
+                confirm_and_apply(res)
+            end, { max_stored = 50000, stream = false })
+        else
+            confirm_and_apply(last_res)
+        end
     end
 
     local function on_select(node, component)
@@ -402,11 +445,17 @@ function M.create(opts)
             status.text = "rg: " .. res.error
         elseif params.pattern == "" then
             status.text = empty_msg
+        elseif not res.final then
+            status.text = ("Searching… %d matches"):format(res.total)
+        elseif res.total == 0 and params.include ~= "" and res.searches == 0 then
+            -- every candidate file was glob-filtered away: almost always an
+            -- include-field typo, not a genuinely match-free repo.
+            status.text = "No files searched — check Files to Include"
         else
-            status.text = ("Total: %d matches, time: %.2fs%s"):format(
+            status.text = ("Total: %d%s matches, time: %.2fs"):format(
                 res.total,
-                (res.ms or 0) / 1000,
-                res.truncated and " (first 1000 shown)" or ""
+                res.truncated and "+" or "",
+                (res.ms or 0) / 1000
             )
         end
 
@@ -496,19 +545,36 @@ function M.create(opts)
         if closed then
             return
         end
+        if params.pattern ~= "" then
+            status.text = "Searching…"
+        end
         engine.search(params, function(res)
             if closed then
                 return
             end
             last_res = res
             render_results(res)
+            if res.final then
+                dirty = false
+            end
         end)
     end
 
     -- shared trailing-edge debounce (vim.debounce is not in the Nvim 0.12 core;
-    -- configured-ms restart timer): every input/toggle funnels through this
+    -- configured-ms restart timer): every input/toggle funnels through this.
+    -- In "full" (on-demand) mode a change only marks the panel stale — the
+    -- scan starts on Enter in the Search field (Ctrl+G switches), never per
+    -- keystroke, which is what keeps a 10-30s giant-repo rescan from being
+    -- killed mid-flight by the next character typed.
     debounce_timer = vim.uv.new_timer()
     schedule = function()
+        dirty = true
+        if search_method ~= "live" then
+            if params.pattern ~= "" then
+                status.text = "On-demand search — press Enter"
+            end
+            return
+        end
         debounce_timer:stop()
         debounce_timer:start(cfg.debounce, 0, vim.schedule_wrap(run_search))
     end
@@ -579,6 +645,13 @@ function M.create(opts)
     -- showing/hiding it would re-flow the flex row and resize the search box
     -- on every mode switch, which is exactly what a find widget must not do.
     local tb_whole = toggle_button("whole", "whole_word", icons.whole_word, "<A-w>", schedule)
+    -- fzf-lua parity toggles: I = include git-ignored files (--no-ignore),
+    -- H = include hidden files (--hidden). A LIT box means "these files are
+    -- in the search". Ctrl+I is unusable here (Neovim delivers it as Tab —
+    -- the panel's focus ring owns byte 9), so ignore rides Alt+I while
+    -- Alt+H stays sidebar navigation (user choice) and hidden takes Ctrl+H.
+    local tb_ignore = toggle_button("no_ignore", "no_ignore", icons.no_ignore, "<A-i>", schedule)
+    local tb_hidden = toggle_button("hidden", "hidden", icons.hidden, "<C-h>", schedule)
     -- ⇄ sits LEFT of Search but is the FIRST TAB STOP after the search field
     -- (explicit panel ring — see panel_step): activating it reveals the
     -- replace ROW (Replace input · AB · ⇉) and jumps the cursor into the
@@ -707,7 +780,11 @@ function M.create(opts)
             n.gap(1),
             tb_whole,
             n.gap(1),
-            tb_regex
+            tb_regex,
+            n.gap(1),
+            tb_ignore,
+            n.gap(1),
+            tb_hidden
         ),
         n.columns(
             { flex = 0, size = 1, hidden = hidden_unless_replace() },
@@ -717,7 +794,10 @@ function M.create(opts)
             n.gap(1),
             btn_replace
         ),
-        ti_include
+        -- current-file search has no file set to narrow: an rg --glob filters
+        -- even explicit FILE arguments (measured), so any leftover include
+        -- text would silently zero the search — the field is hidden there.
+        n.columns({ flex = 1, hidden = opts.file_mode }, ti_include)
     )
 
     local status_par = n.paragraph({ lines = status.text, is_focusable = false, size = 1 })
@@ -755,13 +835,13 @@ function M.create(opts)
     -- the built-in focus_next/focus_prev are disabled at create_renderer and
     -- the walk lives here. Widgets of the hidden replace row drop out
     -- automatically (Component:is_hidden() walks the parent chain). The ring
-    -- follows visual reading order: search row (Search · ⇄ · Aa · ab · .*),
-    -- replace row (Replace · AB · ⇉), then Files to Include, then the
-    -- results tree — so a Tab off ⇉ lands on the include field, not back up
-    -- on Aa.
+    -- follows visual reading order: search row (Search · ⇄ · Aa · ab · .* ·
+    -- I · H), replace row (Replace · AB · ⇉), then Files to Include, then
+    -- the results tree — so a Tab off ⇉ lands on the include field, not back
+    -- up on Aa.
     local panel_order = {
         ti_search, tb_mode,
-        tb_case, tb_whole, tb_regex,
+        tb_case, tb_whole, tb_regex, tb_ignore, tb_hidden,
         ti_replace, tb_preserve, btn_replace,
         ti_include, tree_comp,
     }
@@ -834,10 +914,13 @@ function M.create(opts)
                 { "Enter / Space / click", "activate the focused widget" },
             } },
             { "Search", {
-                { "Enter", "jump from the Search field to the results tree" },
+                { "Enter", "jump to the results tree (on-demand: run first)" },
                 { "Alt+C", ("toggle %s  match case"):format(ic.case) },
                 { "Alt+W", ("toggle %s  whole word"):format(ic.whole_word) },
                 { "Alt+R", ("toggle %s  regular expression"):format(ic.regex) },
+                { "Alt+I", ("toggle %s  include git-ignored files"):format(ic.no_ignore) },
+                { "Ctrl+H", ("toggle %s  include hidden files"):format(ic.hidden) },
+                { "Ctrl+G", "switch live <-> on-demand search" },
                 { ("%s box"):format(ic.replace_mode), "show the replace row and jump to its input" },
             } },
             { "Replace", {
@@ -953,9 +1036,16 @@ function M.create(opts)
             -- re-attach at the bottom of create() guarantees (nui keymap.set
             -- overwrites the same mode+key).
             if c == ti_search then
+                -- Live mode: Enter = "focus results" (VS Code). On-demand
+                -- mode: Enter RUNS the pending search; the next Enter (no
+                -- changes since) jumps to the tree.
                 for _, m in ipairs({ "n", "i" }) do
                     c:map(m, "<CR>", function()
-                        focus_component(tree_comp)
+                        if search_method == "full" and (dirty or not last_res) then
+                            run_search()
+                        else
+                            focus_component(tree_comp)
+                        end
                     end, { noremap = true })
                 end
             end
@@ -1000,6 +1090,22 @@ function M.create(opts)
     renderer:add_mappings({
         { mode = { "n", "i" }, key = "<Tab>", handler = function() panel_step(1) end },
         { mode = { "n", "i" }, key = "<S-Tab>", handler = function() panel_step(-1) end },
+        -- fzf-lua grep<->live_grep parity: same switch, same key.
+        { mode = { "n", "i" }, key = "<C-g>", handler = function()
+            if search_method == "live" then
+                search_method = "full"
+                debounce_timer:stop()
+                engine.cancel()
+                if params.pattern ~= "" then
+                    status.text = "On-demand search — press Enter"
+                end
+            else
+                search_method = "live"
+                if dirty then
+                    run_search()
+                end
+            end
+        end },
     })
     -- Re-attach the panel maps once the first mount has settled (the comment
     -- on the <CR> map above explains why a pre-mount registration is not
